@@ -417,6 +417,14 @@ def 读签名(文, 元素, 键):
     return 函数([], 返)
 
 
+def 是内置属性(对象, 名):
+    """签名以 `->` 开头的内置项是属性（词.长度），不是方法"""
+    if not 对象:
+        return False
+    签 = 内置表.get((对象[0], 名))
+    return 签 is not None and 签.startswith("->")
+
+
 def 查内置(对象, 名):
     if not 对象:
         return None
@@ -866,7 +874,10 @@ def _成员(n):
     if 变体 is not None:
         return 变体构造类型(变体, 枚举型)
     对象 = 检表达式(n.子[0])
-    return 成员类型(对象, n.文字, n, False)
+    t = 成员类型(对象, n.文字, n, False)
+    if t is not None and t[0] == "函数" and 是内置属性(对象, n.文字):
+        return t[2]
+    return t
 
 
 @处("下标")
