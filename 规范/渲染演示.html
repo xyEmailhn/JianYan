@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>简言渲染 v0.3 · 能力预览</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#c9d1d9; --dim:#6e7681;
+    --accent:#79c0ff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif;
+  }
+  header{padding:26px 32px 14px; border-bottom:1px solid var(--line)}
+  h1{margin:0 0 6px; font-size:20px; letter-spacing:.3px}
+  .sub{color:var(--dim); font-size:13px; line-height:1.7}
+  .sub b{color:#e6edf3; font-weight:500}
+  main{
+    display:grid; grid-template-columns:1fr 1fr; gap:22px;
+    padding:22px 32px 40px;
+  }
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:14px; display:flex; flex-direction:column; gap:10px;
+  }
+  .card h2{
+    margin:0; font-size:13px; font-weight:500; color:#e6edf3;
+    display:flex; justify-content:space-between; align-items:baseline;
+  }
+  .card h2 span{font-size:11px; color:var(--dim); font-weight:400}
+  canvas{width:100%; height:auto; border-radius:6px; display:block; background:#000}
+  .tags{display:flex; flex-wrap:wrap; gap:6px; margin-top:2px}
+  .tag{
+    font-size:11px; padding:2px 8px; border-radius:20px;
+    background:#1f6feb22; color:#79c0ff; border:1px solid #1f6feb44;
+  }
+  .tag.g{background:#7ee78722; color:#7ee787; border-color:#7ee78744}
+  .tag.o{background:#ffa65722; color:#ffa657; border-color:#ffa65744}
+  footer{padding:0 32px 40px; color:var(--dim); font-size:12px; line-height:1.9}
+  footer code{color:#8b949e; background:#161b22; padding:1px 5px; border-radius:4px}
+  @media(max-width:860px){ main{grid-template-columns:1fr; padding:16px} header{padding:20px 16px 12px} }
+</style>
+</head>
+<body>
+<header>
+  <h1>简言渲染 v0.3 · 能力预览</h1>
+  <div class="sub">
+    左边是<b>增强 2D</b>：变换栈、圆角裁剪、渐变、路径奇偶规则、虚线描边、混合模式。<br>
+    右边是<b>软件光栅化 3D</b>：顶点变换 → 透视除法 → 三角形填充 → 深度测试 → 片元着色，<b>没有用 WebGL</b>，逐像素算出来的。
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>2D · 可组合的绘图 <span>Canvas API 模拟</span></h2>
+    <canvas id="c2d" width="640" height="460"></canvas>
+    <div class="tags">
+      <span class="tag">变换栈</span>
+      <span class="tag">圆角裁剪</span>
+      <span class="tag">线性/径向渐变</span>
+      <span class="tag o">奇偶填充（差集）</span>
+      <span class="tag o">虚线描边</span>
+      <span class="tag g">混合模式</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3D · 软件光栅化 <span>逐像素，非 WebGL</span></h2>
+    <canvas id="c3d" width="640" height="460"></canvas>
+    <div class="tags">
+      <span class="tag">Mat4 变换</span>
+      <span class="tag">深度缓冲</span>
+      <span class="tag">透视校正 UV</span>
+      <span class="tag o">Blinn-Phong</span>
+      <span class="tag o">背面剔除</span>
+      <span class="tag g">程序纹理</span>
+    </div>
+  </section>
+</main>
+
+<footer>
+  这是按 <code>规范/标准库_v0.3_3D与增强2D.md</code> 里的 API 设计做的效果预览，用 JavaScript 模拟，
+  <b>不是简言的实现</b>。目的是验证这套设计「画得出来、跑得动」——左边每个能力都对应规范里的一节。<br>
+  右边严格走软件光栅流程：每帧约 4 万个像素由 JS 逐像素写入 ImageData，没有 GPU 参与。
+</footer>
+
+<script>
+/* ==========================================================================
+   一、矩阵（列主序，和 OpenGL / Vulkan 一致）
+   ========================================================================== */
+const M4 = {
+  单位: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+
+  乘(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++)
+      for (let r = 0; r < 4; r++) {
+        let s = 0;
+        for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+        o[c * 4 + r] = s;
+      }
+    return o;
+  },
+
+  透视(fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    return new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, 2 * far * near * nf, 0
+    ]);
+  },
+
+  看向(眼, 目标, 上) {
+    let z = 归一(减(眼, 目标));
+    let x = 归一(叉(上, z));
+    let y = 叉(z, x);
+    return new Float32Array([
+      x[0], y[0], z[0], 0,
+      x[1], y[1], z[1], 0,
+      x[2], y[2], z[2], 0,
+      -点(x, 眼), -点(y, 眼), -点(z, 眼), 1
+    ]);
+  },
+
+  旋转Y(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+  },
+  旋转X(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+  },
+  平移(x, y, z) {
+    return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
+  }
+};
+
+function 减(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function 叉(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function 点(a, b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+function 归一(a) { const l = Math.hypot(...a) || 1; return [a[0]/l, a[1]/l, a[2]/l]; }
+function 变换(m, v) {
+  const x = v[0], y = v[1], z = v[2], w = v[3] ?? 1;
+  return [
+    m[0]*x + m[4]*y + m[8]*z + m[12]*w,
+    m[1]*x + m[5]*y + m[9]*z + m[13]*w,
+    m[2]*x + m[6]*y + m[10]*z + m[14]*w,
+    m[3]*x + m[7]*y + m[11]*z + m[15]*w
+  ];
+}
+function 变换方向(m, v) {
+  return [
+    m[0]*v[0] + m[4]*v[1] + m[8]*v[2],
+    m[1]*v[0] + m[5]*v[1] + m[9]*v[2],
+    m[2]*v[0] + m[6]*v[1] + m[10]*v[2]
+  ];
+}
+
+/* ==========================================================================
+   二、网格：立方体，每面独立 UV，带法线
+   ========================================================================== */
+function 造立方体() {
+  const 面 = [
+    // 法线, 四个角（逆时针）
+    { n:[0,0,1],  v:[[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]] },
+    { n:[0,0,-1], v:[[1,-1,-1],[-1,-1,-1],[-1,1,-1],[1,1,-1]] },
+    { n:[1,0,0],  v:[[1,-1,1],[1,-1,-1],[1,1,-1],[1,1,1]] },
+    { n:[-1,0,0], v:[[-1,-1,-1],[-1,-1,1],[-1,1,1],[-1,1,-1]] },
+    { n:[0,1,0],  v:[[-1,1,1],[1,1,1],[1,1,-1],[-1,1,-1]] },
+    { n:[0,-1,0], v:[[-1,-1,-1],[1,-1,-1],[1,-1,1],[-1,-1,1]] },
+  ];
+  const 位置 = [], 法线 = [], uv = [], 索引 = [];
+  let 基 = 0;
+  面.forEach(f => {
+    [[0,0],[1,0],[1,1],[0,1]].forEach(([u, v], i) => {
+      位置.push(...f.v[i]);
+      法线.push(...f.n);
+      uv.push(u, v);
+    });
+    索引.push(基, 基+1, 基+2, 基, 基+2, 基+3);
+    基 += 4;
+  });
+  return { 位置, 法线, uv, 索引 };
+}
+
+const 立方 = 造立方体();
+
+/* ==========================================================================
+   三、3D 软件光栅化
+   ========================================================================== */
+const c3d = document.getElementById('c3d');
+const g3d = c3d.getContext('2d');
+const 宽 = c3d.width, 高 = c3d.height;
+const 图 = g3d.createImageData(宽, 高);
+const 深度 = new Float32Array(宽 * 高);
+
+/* 程序纹理：棋盘 + 一点噪声，避免死板 */
+function 采纹理(u, v) {
+  const 格 = 4;
+  const a = (Math.floor(u * 格) + Math.floor(v * 格)) & 1;
+  const 底 = a ? [232, 226, 216] : [58, 64, 78];
+  const 纹 = ((Math.sin(u * 97.1) * Math.cos(v * 73.7)) * 0.5 + 0.5) * 10;
+  return [底[0] + 纹, 底[1] + 纹, 底[2] + 纹];
+}
+
+function 画3D(时间) {
+  const 投影 = M4.透视(Math.PI / 4, 宽 / 高, 0.1, 100);
+  const 视图 = M4.看向([0, 1.4, 5.2], [0, 0, 0], [0, 1, 0]);
+  let 模型 = M4.乘(M4.旋转X(时间 * 0.31), M4.旋转Y(时间 * 0.53));
+  模型 = M4.乘(M4.平移(0, 0, 0), 模型);
+  const 全 = M4.乘(投影, M4.乘(视图, 模型));
+
+  // 光：世界空间固定方向
+  const 光 = 归一([-0.45, 0.75, 0.55]);
+  const 视点 = [0, 1.4, 5.2];
+
+  // 清屏：竖向暗渐变
+  const d = 图.data;
+  for (let y = 0; y < 高; y++) {
+    const t = y / 高;
+    const r = 14 + t * 8, g = 17 + t * 10, b = 24 + t * 14;
+    for (let x = 0; x < 宽; x++) {
+      const i = (y * 宽 + x) * 4;
+      d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = 255;
+    }
+  }
+  深度.fill(Infinity);
+
+  // 顶点变换
+  const N = 立方.位置.length / 3;
+  const 裁剪 = [], 世界 = [], 世界法线 = [], 屏幕UV = [];
+  for (let i = 0; i < N; i++) {
+    const p = [立方.位置[i*3], 立方.位置[i*3+1], 立方.位置[i*3+2], 1];
+    const w = 变换(模型, p);
+    世界.push(w);
+    const c = 变换(全, p);
+    裁剪.push(c);
+    const n = [立方.法线[i*3], 立方.法线[i*3+1], 立方.法线[i*3+2]];
+    世界法线.push(归一(变换方向(模型, n)));
+    屏幕UV.push([立方.uv[i*2], 立方.uv[i*2+1]]);
+  }
+
+  // 逐三角形
+  const 索引 = 立方.索引;
+  for (let t = 0; t < 索引.length; t += 3) {
+    const i0 = 索引[t], i1 = 索引[t+1], i2 = 索引[t+2];
+    const a = 裁剪[i0], b = 裁剪[i1], c = 裁剪[i2];
+
+    // 近平面整体裁掉
+    if (a[2] < -a[3] && b[2] < -b[3] && c[2] < -c[3]) continue;
+    if (a[3] <= 0 || b[3] <= 0 || c[3] <= 0) continue;
+
+    // 透视除法 → NDC → 屏幕
+    const 屏 = [a, b, c].map(v => {
+      const x = v[0] / v[3], y = v[1] / v[3], z = v[2] / v[3];
+      return [(x * 0.5 + 0.5) * 宽, (1 - (y * 0.5 + 0.5)) * 高, z, v[3]];
+    });
+
+    // 背面剔除（屏幕空间有向面积）
+    const 面积 = (屏[1][0]-屏[0][0]) * (屏[2][1]-屏[0][1])
+               - (屏[2][0]-屏[0][0]) * (屏[1][1]-屏[0][1]);
+    if (面积 >= 0) continue;
+
+    // 光照：用三个顶点的平均法线做一次就行（平坦着色）
+    const n = 归一([
+      世界法线[i0][0] + 世界法线[i1][0] + 世界法线[i2][0],
+      世界法线[i0][1] + 世界法线[i1][1] + 世界法线[i2][1],
+      世界法线[i0][2] + 世界法线[i1][2] + 世界法线[i2][2],
+    ]);
+    const 漫 = Math.max(0, 点(n, 光));
+    const V = 归一(减(视点, 世界[i0]));
+    const H = 归一([光[0]+V[0], 光[1]+V[1], 光[2]+V[2]]);
+    const 高光 = Math.pow(Math.max(0, 点(n, H)), 48) * 0.9;
+    const 环境 = 0.18;
+    const 亮 = 环境 + 漫 * 0.85;
+
+    // 包围盒
+    const 最小X = Math.max(0, Math.floor(Math.min(屏[0][0], 屏[1][0], 屏[2][0])));
+    const 最大X = Math.min(宽 - 1, Math.ceil(Math.max(屏[0][0], 屏[1][0], 屏[2][0])));
+    const 最小Y = Math.max(0, Math.floor(Math.min(屏[0][1], 屏[1][1], 屏[2][1])));
+    const 最大Y = Math.min(高 - 1, Math.ceil(Math.max(屏[0][1], 屏[1][1], 屏[2][1])));
+
+    const 面 = 1 / 面积;
+    const uv0 = 屏幕UV[i0], uv1 = 屏幕UV[i1], uv2 = 屏幕UV[i2];
+    const w0 = 1 / 屏[0][3], w1 = 1 / 屏[1][3], w2 = 1 / 屏[2][3];
+
+    for (let y = 最小Y; y <= 最大Y; y++) {
+      for (let x = 最小X; x <= 最大X; x++) {
+        const px = x + 0.5, py = y + 0.5;
+        // 重心坐标
+        const w0b = ((屏[1][0]-px) * (屏[2][1]-py) - (屏[2][0]-px) * (屏[1][1]-py)) * 面;
+        const w1b = ((屏[2][0]-px) * (屏[0][1]-py) - (屏[0][0]-px) * (屏[2][1]-py)) * 面;
+        const w2b = 1 - w0b - w1b;
+        if (w0b < 0 || w1b < 0 || w2b < 0) continue;
+
+        // 透视校正：先除以 w 插值，再乘回来
+        const 校 = w0b * w0 + w1b * w1 + w2b * w2;
+        const ww0 = w0b * w0 / 校, ww1 = w1b * w1 / 校, ww2 = w2b * w2 / 校;
+        const z = ww0 * 屏[0][2] + ww1 * 屏[1][2] + ww2 * 屏[2][2];
+
+        const 序 = y * 宽 + x;
+        if (z >= 深度[序]) continue;
+        深度[序] = z;
+
+        const u = ww0 * uv0[0] + ww1 * uv1[0] + ww2 * uv2[0];
+        const v = ww0 * uv0[1] + ww1 * uv1[1] + ww2 * uv2[1];
+        const [r, g, b] = 采纹理(u, v);
+
+        const i = 序 * 4;
+        d[i]   = Math.min(255, r * 亮 + 高光 * 255);
+        d[i+1] = Math.min(255, g * 亮 + 高光 * 255);
+        d[i+2] = Math.min(255, b * 亮 + 高光 * 255);
+        d[i+3] = 255;
+      }
+    }
+  }
+
+  g3d.putImageData(图, 0, 0);
+
+  // 立方体的投影：一个软边的椭圆，让物体"落地"
+  const 影心 = 投影点([0, -1.02, 0], 全);
+  if (影心) {
+    g3d.save();
+    g3d.translate(影心[0], 影心[1] + 12);
+    g3d.scale(1, 0.28);
+    const 影 = g3d.createRadialGradient(0, 0, 2, 0, 0, 120);
+    影.addColorStop(0, 'rgba(0,0,0,0.5)');
+    影.addColorStop(0.6, 'rgba(0,0,0,0.22)');
+    影.addColorStop(1, 'rgba(0,0,0,0)');
+    g3d.fillStyle = 影;
+    g3d.beginPath();
+    g3d.arc(0, 0, 120, 0, Math.PI * 2);
+    g3d.fill();
+    g3d.restore();
+  }
+
+  // 地面网格线（用 2D 画，示意场景）
+  g3d.save();
+  g3d.strokeStyle = 'rgba(120,160,220,0.15)';
+  g3d.lineWidth = 1;
+  for (let i = -6; i <= 6; i++) {
+    const p1 = 投影点([i * 0.9, -1.001, -6], 全);
+    const p2 = 投影点([i * 0.9, -1.001, 6], 全);
+    const p3 = 投影点([-6, -1.001, i * 0.9], 全);
+    const p4 = 投影点([6, -1.001, i * 0.9], 全);
+    if (p1 && p2) { g3d.beginPath(); g3d.moveTo(...p1); g3d.lineTo(...p2); g3d.stroke(); }
+    if (p3 && p4) { g3d.beginPath(); g3d.moveTo(...p3); g3d.lineTo(...p4); g3d.stroke(); }
+  }
+  g3d.restore();
+}
+
+function 投影点(p, 全) {
+  const c = 变换(全, [p[0], p[1], p[2], 1]);
+  if (c[3] <= 0) return null;
+  return [(c[0] / c[3] * 0.5 + 0.5) * 宽, (1 - (c[1] / c[3] * 0.5 + 0.5)) * 高];
+}
+
+/* ==========================================================================
+   四、2D：变换栈、裁剪、渐变、奇偶填充、虚线、混合模式
+   ========================================================================== */
+const c2d = document.getElementById('c2d');
+const g2d = c2d.getContext('2d');
+const W2 = c2d.width, H2 = c2d.height;
+
+function 圆角矩形(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function 画2D(时间) {
+  g2d.clearRect(0, 0, W2, H2);
+
+  // --- 背景：线性渐变 ---
+  const 底 = g2d.createLinearGradient(0, 0, 0, H2);
+  底.addColorStop(0.0, '#161d2b');
+  底.addColorStop(0.55, '#101623');
+  底.addColorStop(1.0, '#0a0e16');
+  g2d.fillStyle = 底;
+  g2d.fillRect(0, 0, W2, H2);
+
+  // --- 径向光晕：证明径向渐变 ---
+  const 晕 = g2d.createRadialGradient(W2 * 0.68, H2 * 0.28, 10, W2 * 0.68, H2 * 0.28, 260);
+  晕.addColorStop(0, 'rgba(90,140,255,0.22)');
+  晕.addColorStop(1, 'rgba(90,140,255,0)');
+  g2d.fillStyle = 晕;
+  g2d.fillRect(0, 0, W2, H2);
+
+  // --- 变换栈：三张卡片，各自旋转 ---
+  const 卡 = [
+    { x: 78,  y: 96,  w: 158, h: 122, 角: -0.20, 色: ['#2b5cff', '#6ea8ff'] },
+    { x: 176, y: 122, w: 158, h: 122, 角: 0.06,  色: ['#ff7a59', '#ffb08a'] },
+    { x: 274, y: 96,  w: 158, h: 122, 角: 0.24,  色: ['#18b58a', '#6ee7c0'] },
+  ];
+
+  卡.forEach((c, i) => {
+    g2d.save();                       // ← 压入变换
+    g2d.translate(c.x, c.y);
+    g2d.rotate(c.角 + Math.sin(时间 * 0.6 + i) * 0.04);
+    g2d.translate(-c.x, -c.y);
+
+    // 阴影
+    g2d.shadowColor = 'rgba(0,0,0,0.45)';
+    g2d.shadowBlur = 18;
+    g2d.shadowOffsetY = 8;
+
+    const 渐 = g2d.createLinearGradient(c.x, c.y, c.x + c.w, c.y + c.h);
+    渐.addColorStop(0, c.色[0]);
+    渐.addColorStop(1, c.色[1]);
+    g2d.fillStyle = 渐;
+    圆角矩形(g2d, c.x, c.y, c.w, c.h, 14);
+    g2d.fill();
+
+    g2d.shadowColor = 'transparent';
+    g2d.shadowBlur = 0;
+    g2d.shadowOffsetY = 0;
+
+    // 卡内：圆角裁剪 + 条纹
+    g2d.save();
+    圆角矩形(g2d, c.x, c.y, c.w, c.h, 14);
+    g2d.clip();                        // ← 圆角裁剪
+    g2d.globalAlpha = 0.18;
+    g2d.fillStyle = '#fff';
+    for (let k = -c.h; k < c.w; k += 14) {
+      g2d.beginPath();
+      g2d.moveTo(c.x + k, c.y);
+      g2d.lineTo(c.x + k + 7, c.y);
+      g2d.lineTo(c.x + k + 7 - c.h, c.y + c.h);
+      g2d.lineTo(c.x + k - c.h, c.y + c.h);
+      g2d.closePath();
+      g2d.fill();
+    }
+    g2d.restore();
+
+    // 卡上的字
+    g2d.fillStyle = 'rgba(255,255,255,0.95)';
+    g2d.font = '600 13px "Noto Sans CJK SC", sans-serif';
+    g2d.fillText(['变换栈', '圆角裁剪', '渐变填充'][i], c.x + 15, c.y + c.h - 16);
+
+    g2d.restore();                     // ← 弹出变换
+  });
+
+  // --- 奇偶填充：圆环 = 外圆 + 内圆，evenodd 挖空 ---
+  g2d.save();
+  g2d.beginPath();
+  g2d.arc(108, 330, 54, 0, Math.PI * 2);
+  g2d.arc(108, 330, 29, 0, Math.PI * 2);
+  const 环 = g2d.createLinearGradient(50, 276, 166, 384);
+  环.addColorStop(0, '#79c0ff');
+  环.addColorStop(1, '#d2a8ff');
+  g2d.fillStyle = 环;
+  g2d.fill('evenodd');                 // ← 奇偶规则，等于"外圆减内圆"
+  g2d.restore();
+
+  // 环外圈虚线
+  g2d.save();
+  g2d.strokeStyle = 'rgba(210,168,255,0.55)';
+  g2d.lineWidth = 2;
+  g2d.setLineDash([6, 7]);             // ← 虚线
+  g2d.lineDashOffset = -时间 * 26;
+  g2d.beginPath();
+  g2d.arc(108, 330, 63, 0, Math.PI * 2);
+  g2d.stroke();
+  g2d.restore();
+
+  // --- 混合模式：橙色圆叠加在蓝紫渐变上 ---
+  g2d.save();
+  g2d.globalCompositeOperation = 'lighter';   // ← 混合模式：加
+  const 点1 = g2d.createRadialGradient(206, 340, 2, 206, 340, 50);
+  点1.addColorStop(0, 'rgba(255,140,80,0.9)');
+  点1.addColorStop(1, 'rgba(255,140,80,0)');
+  g2d.fillStyle = 点1;
+  g2d.beginPath();
+  g2d.arc(206, 340, 50, 0, Math.PI * 2);
+  g2d.fill();
+  g2d.restore();
+
+  g2d.save();
+  g2d.globalCompositeOperation = 'screen';
+  const 点2 = g2d.createRadialGradient(248, 322, 2, 248, 322, 46);
+  点2.addColorStop(0, 'rgba(80,200,255,0.8)');
+  点2.addColorStop(1, 'rgba(80,200,255,0)');
+  g2d.fillStyle = 点2;
+  g2d.beginPath();
+  g2d.arc(248, 322, 46, 0, Math.PI * 2);
+  g2d.fill();
+  g2d.restore();
+
+  // --- 文字排版示意 ---
+  g2d.fillStyle = 'rgba(230,237,243,0.92)';
+  g2d.font = '600 17px "Noto Sans CJK SC", sans-serif';
+  g2d.fillText('二维不是画线', 372, 300);
+  g2d.fillText('是可组合', 372, 324);
+
+  g2d.fillStyle = 'rgba(139,148,158,0.95)';
+  g2d.font = '12.5px "Noto Sans CJK SC", sans-serif';
+  const 行 = [
+    '压入变换，每张卡各自旋转；',
+    '圆角裁剪，内容不出框；',
+    '奇偶填充，两圆变成一环；',
+    'screen 叠加，光会越叠越亮。'
+  ];
+  行.forEach((t, i) => g2d.fillText(t, 372, 350 + i * 21));
+
+  // --- 底部标注 ---
+  g2d.fillStyle = 'rgba(110,118,129,0.85)';
+  g2d.font = '11.5px "Noto Sans CJK SC", sans-serif';
+  g2d.fillText('变换栈 · 圆角裁剪 · 线性/径向渐变 · 奇偶填充 · 虚线 · 混合模式', 36, H2 - 22);
+}
+
+/* ==========================================================================
+   五、主循环
+   ========================================================================== */
+let 开始 = performance.now();
+
+function 帧(now) {
+  const t = (now - 开始) / 1000;
+  画2D(t);
+  画3D(t);
+  requestAnimationFrame(帧);
+}
+
+// 先画一帧静态的，避免首屏空白
+画2D(0);
+画3D(0);
+requestAnimationFrame(帧);
+</script>
+</body>
+</html>
