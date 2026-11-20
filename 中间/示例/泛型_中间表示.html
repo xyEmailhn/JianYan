@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>中间表示：示例/泛型.jy</title>
+<style>
+:root {
+  --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#c9d1d9; --dim:#6e7681;
+  --mono:"JetBrains Mono","SF Mono",Consolas,"Noto Sans Mono CJK SC",monospace;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif;
+  display:grid; grid-template-columns:240px 1fr; min-height:100vh;
+}
+aside {
+  position:sticky; top:0; height:100vh; overflow:auto;
+  border-right:1px solid var(--line); padding:20px 14px; background:var(--panel);
+}
+aside h1 { font-size:15px; margin:0 0 4px; font-weight:600; letter-spacing:.5px; }
+aside .sub { font-size:12px; color:var(--dim); margin-bottom:18px; line-height:1.6; }
+aside a {
+  display:block; padding:6px 10px; border-radius:6px; color:var(--fg);
+  text-decoration:none; font-family:var(--mono); font-size:13px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+aside a:hover { background:#21262d; }
+main { padding:28px 36px 80px; max-width:1180px; }
+header h1 { font-size:22px; margin:0 0 6px; }
+header p { color:var(--dim); font-size:13px; margin:0 0 26px; }
+.fn { margin-bottom:34px; }
+.fn h2 {
+  font-size:14px; font-weight:500; margin:0 0 10px; color:#e6edf3;
+  display:flex; align-items:baseline; gap:12px;
+}
+.fn h2 code { font-family:var(--mono); font-size:13.5px; }
+.count { font-size:11px; color:var(--dim); font-weight:400; }
+.block {
+  background:var(--panel); border:1px solid var(--line); border-radius:8px;
+  padding:24px 14px 12px 14px; margin-bottom:10px; position:relative;
+  font-family:var(--mono); font-size:13px; line-height:1.85;
+  overflow-x:auto;
+}
+.blk-tag {
+  position:absolute; left:-1px; top:-1px; background:#21262d;
+  border:1px solid var(--line); border-radius:8px 0 8px 0;
+  padding:1px 9px; font-size:11px; color:#8b949e; font-weight:600;
+  letter-spacing:.4px;
+}
+.blk-tag + .note { margin-left:44px; }
+.note { font-size:11px; color:var(--dim); }
+.ins { white-space:pre; }
+.ins::before {
+  content:""; display:inline-block; width:3px; height:13px;
+  background:var(--c); border-radius:2px; margin-right:9px; vertical-align:-1px;
+  opacity:.95;
+}
+.ins:hover { background:#1f242c; border-radius:4px; }
+.tid { color:#79c0ff; background:#1f6feb22; padding:0 3px; border-radius:3px; }
+.var { color:#ffa657; background:#ffa65711; padding:0 3px; border-radius:3px; }
+.lbl {
+  color:#e3b341; text-decoration:none; border-bottom:1px dashed #e3b34166;
+  font-weight:600;
+}
+.lbl:hover { background:#e3b34122; }
+.stats { margin-top:40px; border-top:1px solid var(--line); padding-top:18px; }
+.stats h2 { font-size:13px; color:var(--dim); font-weight:500; margin:0 0 8px; }
+.stat-line { font-family:var(--mono); font-size:13px; color:#8b949e; line-height:1.9; }
+@media (max-width:820px) {
+  body { grid-template-columns:1fr; }
+  aside { position:static; height:auto; border-right:0; border-bottom:1px solid var(--line); }
+  main { padding:20px 16px 60px; }
+}
+</style></head>
+<body>
+<aside>
+  <h1>简言 · 中间表示</h1>
+  <div class="sub">三地址码 + 基本块<br>6 个函数</div>
+  <a href="#f0">折叠</a><a href="#f1">演示</a><a href="#f2">最大$整数</a><a href="#f3">最大$浮点</a><a href="#f4">三个最大$整数</a><a href="#f5">最大$字符串</a>
+</aside>
+<main>
+  <header>
+    <h1>中间表示：示例/泛型.jy</h1>
+    <p>左边竖条是品类：<span style="color:#79c0ff">算术</span> ·
+       <span style="color:#ffa657">调用</span> ·
+       <span style="color:#e3b341">跳转</span> ·
+       <span style="color:#ff7b72">返回</span> ·
+       <span style="color:#56d4dd">数据搬运</span> ·
+       <span style="color:#7ee787">构造</span></p>
+  </header>
+  
+<section class="fn" id="f0">
+  <h2><code>函数 折叠() -&gt; 整数</code><span class="count">2 条</span></h2>
+  <div class="block"><div class="blk-tag" id="f0-L0">L0</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t0</span></span> = 常量 1047 : 整数</div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回 <span class="tid"><span class="var">%t0</span></span></div>
+</div>
+</section>
+<section class="fn" id="f1">
+  <h2><code>函数 演示()</code><span class="count">26 条</span></h2>
+  <div class="block"><div class="blk-tag" id="f1-L0">L0</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t0</span></span> = 常量 1 : 整数</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t1</span></span> = 常量 2 : 整数</div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t2</span></span> = 调用 最大$整数(<span class="tid"><span class="var">%t0</span></span>, <span class="tid"><span class="var">%t1</span></span>) : 整数</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    存 <span class="var">%甲</span>, <span class="tid"><span class="var">%t2</span></span></div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t4</span></span> = 常量 1.5 : 浮点</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t5</span></span> = 常量 2.5 : 浮点</div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t6</span></span> = 调用 最大$浮点(<span class="tid"><span class="var">%t4</span></span>, <span class="tid"><span class="var">%t5</span></span>) : 浮点</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    存 <span class="var">%乙</span>, <span class="tid"><span class="var">%t6</span></span></div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t8</span></span> = 常量 3 : 整数</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t9</span></span> = 常量 9 : 整数</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t10</span></span> = 常量 5 : 整数</div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t11</span></span> = 调用 三个最大$整数(<span class="tid"><span class="var">%t8</span></span>, <span class="tid"><span class="var">%t9</span></span>, <span class="tid"><span class="var">%t10</span></span>) : 整数</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    存 <span class="var">%丙</span>, <span class="tid"><span class="var">%t11</span></span></div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t13</span></span> = 常量 &quot;abc&quot; : 字符串</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t14</span></span> = 常量 &quot;abd&quot; : 字符串</div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t15</span></span> = 调用 最大$字符串(<span class="tid"><span class="var">%t13</span></span>, <span class="tid"><span class="var">%t14</span></span>) : 字符串</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    存 <span class="var">%丁</span>, <span class="tid"><span class="var">%t15</span></span></div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t17</span></span> = 载 <span class="var">%甲</span></div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t18</span></span> = 调用 打印(<span class="tid"><span class="var">%t17</span></span>) : 空值</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t19</span></span> = 载 <span class="var">%乙</span></div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t20</span></span> = 调用 打印(<span class="tid"><span class="var">%t19</span></span>) : 空值</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t21</span></span> = 载 <span class="var">%丙</span></div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t22</span></span> = 调用 打印(<span class="tid"><span class="var">%t21</span></span>) : 空值</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t23</span></span> = 载 <span class="var">%丁</span></div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t24</span></span> = 调用 打印(<span class="tid"><span class="var">%t23</span></span>) : 空值</div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回</div>
+</div>
+</section>
+<section class="fn" id="f2">
+  <h2><code>函数 最大$整数(甲: 整数, 乙: 整数) -&gt; 整数</code><span class="count">9 条</span></h2>
+  <div class="block"><div class="blk-tag" id="f2-L0">L0</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t2</span></span> = 载 <span class="var">%甲</span></div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t3</span></span> = 载 <span class="var">%乙</span></div>
+<div class="ins" data-k="purple" style="--c:#d2a8ff">    <span class="tid"><span class="var">%t4</span></span> = 大于 <span class="tid"><span class="var">%t2</span></span>, <span class="tid"><span class="var">%t3</span></span> : 布尔值</div>
+<div class="ins" data-k="yellow" style="--c:#e3b341">    条件跳 <span class="tid"><span class="var">%t4</span></span> 则 <a class="lbl" href="#f2-L1">L1</a> 否则 <a class="lbl" href="#f2-L2">L2</a></div></div><div class="block"><div class="blk-tag" id="f2-L1">L1</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t5</span></span> = 载 <span class="var">%甲</span></div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回 <span class="tid"><span class="var">%t5</span></span></div></div><div class="block"><div class="blk-tag" id="f2-L2">L2</div>
+<div class="ins" data-k="yellow" style="--c:#e3b341">    跳 <a class="lbl" href="#f2-L3">L3</a></div></div><div class="block"><div class="blk-tag" id="f2-L3">L3</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t6</span></span> = 载 <span class="var">%乙</span></div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回 <span class="tid"><span class="var">%t6</span></span></div>
+</div>
+</section>
+<section class="fn" id="f3">
+  <h2><code>函数 最大$浮点(甲: 浮点, 乙: 浮点) -&gt; 浮点</code><span class="count">9 条</span></h2>
+  <div class="block"><div class="blk-tag" id="f3-L0">L0</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t2</span></span> = 载 <span class="var">%甲</span></div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t3</span></span> = 载 <span class="var">%乙</span></div>
+<div class="ins" data-k="purple" style="--c:#d2a8ff">    <span class="tid"><span class="var">%t4</span></span> = 大于 <span class="tid"><span class="var">%t2</span></span>, <span class="tid"><span class="var">%t3</span></span> : 布尔值</div>
+<div class="ins" data-k="yellow" style="--c:#e3b341">    条件跳 <span class="tid"><span class="var">%t4</span></span> 则 <a class="lbl" href="#f3-L1">L1</a> 否则 <a class="lbl" href="#f3-L2">L2</a></div></div><div class="block"><div class="blk-tag" id="f3-L1">L1</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t5</span></span> = 载 <span class="var">%甲</span></div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回 <span class="tid"><span class="var">%t5</span></span></div></div><div class="block"><div class="blk-tag" id="f3-L2">L2</div>
+<div class="ins" data-k="yellow" style="--c:#e3b341">    跳 <a class="lbl" href="#f3-L3">L3</a></div></div><div class="block"><div class="blk-tag" id="f3-L3">L3</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t6</span></span> = 载 <span class="var">%乙</span></div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回 <span class="tid"><span class="var">%t6</span></span></div>
+</div>
+</section>
+<section class="fn" id="f4">
+  <h2><code>函数 三个最大$整数(甲: 整数, 乙: 整数, 丙: 整数) -&gt; 整数</code><span class="count">6 条</span></h2>
+  <div class="block"><div class="blk-tag" id="f4-L0">L0</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t3</span></span> = 载 <span class="var">%甲</span></div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t4</span></span> = 载 <span class="var">%乙</span></div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t5</span></span> = 调用 最大$整数(<span class="tid"><span class="var">%t3</span></span>, <span class="tid"><span class="var">%t4</span></span>) : 整数</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t6</span></span> = 载 <span class="var">%丙</span></div>
+<div class="ins" data-k="orange" style="--c:#ffa657">    <span class="tid"><span class="var">%t7</span></span> = 调用 最大$整数(<span class="tid"><span class="var">%t5</span></span>, <span class="tid"><span class="var">%t6</span></span>) : 整数</div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回 <span class="tid"><span class="var">%t7</span></span></div>
+</div>
+</section>
+<section class="fn" id="f5">
+  <h2><code>函数 最大$字符串(甲: 字符串, 乙: 字符串) -&gt; 字符串</code><span class="count">9 条</span></h2>
+  <div class="block"><div class="blk-tag" id="f5-L0">L0</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t2</span></span> = 载 <span class="var">%甲</span></div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t3</span></span> = 载 <span class="var">%乙</span></div>
+<div class="ins" data-k="purple" style="--c:#d2a8ff">    <span class="tid"><span class="var">%t4</span></span> = 大于 <span class="tid"><span class="var">%t2</span></span>, <span class="tid"><span class="var">%t3</span></span> : 布尔值</div>
+<div class="ins" data-k="yellow" style="--c:#e3b341">    条件跳 <span class="tid"><span class="var">%t4</span></span> 则 <a class="lbl" href="#f5-L1">L1</a> 否则 <a class="lbl" href="#f5-L2">L2</a></div></div><div class="block"><div class="blk-tag" id="f5-L1">L1</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t5</span></span> = 载 <span class="var">%甲</span></div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回 <span class="tid"><span class="var">%t5</span></span></div></div><div class="block"><div class="blk-tag" id="f5-L2">L2</div>
+<div class="ins" data-k="yellow" style="--c:#e3b341">    跳 <a class="lbl" href="#f5-L3">L3</a></div></div><div class="block"><div class="blk-tag" id="f5-L3">L3</div>
+<div class="ins" data-k="cyan" style="--c:#56d4dd">    <span class="tid"><span class="var">%t6</span></span> = 载 <span class="var">%乙</span></div>
+<div class="ins" data-k="red" style="--c:#ff7b72">    返回 <span class="tid"><span class="var">%t6</span></span></div>
+</div>
+</section>
+  <section class="stats"><h2>统计</h2><div class="stat-line">--- 统计 ---</div><div class="stat-line">函数 6 个（其中单态化实例 4 个）</div><div class="stat-line">基本块 15 个，指令 61 条</div><div class="stat-line">常量折叠 1 处，丢弃返回值 0 处</div></section>
+</main>
+</body></html>
