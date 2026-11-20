@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>简言词法可视化</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1b1e24; --line: #2a2f38; --fg: #d7dce4; --dim: #7b8494;
+    --kw: #c792ea; --ident: #82aaff; --num: #f78c6c; --str: #c3e88d;
+    --punct: #8b95a7; --err: #ff5370;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    line-height: 1.7; padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 8px; letter-spacing: .5px; }
+  .sub { color: var(--dim); font-size: 14px; margin-bottom: 28px; }
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 18px; min-width: 108px;
+  }
+  .stat b { display: block; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--dim); font-size: 12px; }
+  .legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 12px; font-size: 13px; color: var(--fg); font-family: inherit;
+    transition: .15s;
+  }
+  .chip i { font-style: normal; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .chip:hover { border-color: var(--fg); }
+  .chip.on { border-color: currentColor; box-shadow: 0 0 0 1px currentColor inset; }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 22px 24px; overflow-x: auto; margin: 0 0 26px;
+    font-family: "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 14px; line-height: 1.85; tab-size: 4;
+  }
+  .t { border-radius: 3px; padding: 1px 0; transition: .12s; }
+  .t:hover { background: #2d3440; outline: 1px solid #3d4654; }
+  .kw    { color: var(--kw);    font-weight: 600; }
+  .ident { color: var(--ident); }
+  .int, .float { color: var(--num); }
+  .str   { color: var(--str); }
+  .punct { color: var(--punct); }
+  .err   { color: var(--err); text-decoration: wavy underline; }
+  body.focus .t { opacity: .18; }
+  body.focus .t.match { opacity: 1; }
+  .foot { color: var(--dim); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+  .foot code { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>简言源码，机器是这样读的</h1>
+  <div class="sub">鼠标悬停任意一个有颜色的词，可以看到它在第几行第几列、被归为哪一类。点下面的色块可以只看某一类。</div>
+
+  <div class="cards">
+      <div class="stat"><b>506</b><span>个词</span></div>
+      <div class="stat"><b>140</b><span>个名字</span></div>
+      <div class="stat"><b>108</b><span>个关键字</span></div>
+      <div class="stat"><b>3114</b><span>字节源码</span></div>
+    </div>
+  <div class="legend"><button class="chip ident" data-k="ident" onclick="filter(this)"><b>标识符</b><i>140</i></button><button class="chip kw" data-k="kw" onclick="filter(this)"><b>关键字</b><i>108</i></button><button class="chip int" data-k="int" onclick="filter(this)"><b>整数</b><i>26</i></button><button class="chip float" data-k="float" onclick="filter(this)"><b>浮点</b><i>2</i></button><button class="chip str" data-k="str" onclick="filter(this)"><b>字符串</b><i>5</i></button><button class="chip punct" data-k="punct" onclick="filter(this)"><b>符号</b><i>225</i></button><button class="chip err" data-k="err" onclick="filter(this)"><b>错误</b><i>0</i></button></div>
+
+  <pre>-- 词频统计：读一个文本文件，统计每个词出现几次，打印前 10 名
+-- 这一份既是示例程序，也是词法分析器的测试用例
+
+<span class="t kw" data-k="kw" title="第4行 第1列 · 关键字">模块</span> <span class="t ident" data-k="ident" title="第4行 第4列 · 标识符">词频</span>
+
+<span class="t kw" data-k="kw" title="第6行 第1列 · 关键字">引入</span> <span class="t ident" data-k="ident" title="第6行 第4列 · 标识符">std</span><span class="t punct" data-k="punct" title="第6行 第7列 · 符号">.</span><span class="t ident" data-k="ident" title="第6行 第8列 · 标识符">io</span>
+<span class="t kw" data-k="kw" title="第7行 第1列 · 关键字">引入</span> <span class="t ident" data-k="ident" title="第7行 第4列 · 标识符">std</span><span class="t punct" data-k="punct" title="第7行 第7列 · 符号">.</span><span class="t ident" data-k="ident" title="第7行 第8列 · 标识符">string</span>
+<span class="t kw" data-k="kw" title="第8行 第1列 · 关键字">引入</span> <span class="t ident" data-k="ident" title="第8行 第4列 · 标识符">std</span><span class="t punct" data-k="punct" title="第8行 第7列 · 符号">.</span><span class="t ident" data-k="ident" title="第8行 第8列 · 标识符">array</span>
+<span class="t kw" data-k="kw" title="第9行 第1列 · 关键字">引入</span> <span class="t ident" data-k="ident" title="第9行 第4列 · 标识符">std</span><span class="t punct" data-k="punct" title="第9行 第7列 · 符号">.</span><span class="t ident" data-k="ident" title="第9行 第8列 · 标识符">map</span>
+<span class="t kw" data-k="kw" title="第10行 第1列 · 关键字">引入</span> <span class="t ident" data-k="ident" title="第10行 第4列 · 标识符">std</span><span class="t punct" data-k="punct" title="第10行 第7列 · 符号">.</span><span class="t ident" data-k="ident" title="第10行 第8列 · 标识符">os</span>
+<span class="t kw" data-k="kw" title="第11行 第1列 · 关键字">引入</span> <span class="t ident" data-k="ident" title="第11行 第4列 · 标识符">std</span><span class="t punct" data-k="punct" title="第11行 第7列 · 符号">.</span><span class="t ident" data-k="ident" title="第11行 第8列 · 标识符">fs</span>
+
+<span class="t kw" data-k="kw" title="第13行 第1列 · 关键字">结构</span> <span class="t ident" data-k="ident" title="第13行 第4列 · 标识符">词频项</span> <span class="t punct" data-k="punct" title="第13行 第8列 · 符号">{</span>
+    <span class="t ident" data-k="ident" title="第14行 第5列 · 标识符">词</span><span class="t punct" data-k="punct" title="第14行 第6列 · 符号">:</span> <span class="t kw" data-k="kw" title="第14行 第8列 · 关键字">字符串</span>
+    <span class="t ident" data-k="ident" title="第15行 第5列 · 标识符">次数</span><span class="t punct" data-k="punct" title="第15行 第7列 · 符号">:</span> <span class="t kw" data-k="kw" title="第15行 第9列 · 关键字">整数</span>
+<span class="t punct" data-k="punct" title="第16行 第1列 · 符号">}</span>
+
+-- 把文本切成词，数一数每个词出现几次
+<span class="t kw" data-k="kw" title="第19行 第1列 · 关键字">函数</span> <span class="t ident" data-k="ident" title="第19行 第4列 · 标识符">统计</span><span class="t punct" data-k="punct" title="第19行 第6列 · 符号">(</span><span class="t ident" data-k="ident" title="第19行 第7列 · 标识符">文本</span><span class="t punct" data-k="punct" title="第19行 第9列 · 符号">:</span> <span class="t kw" data-k="kw" title="第19行 第11列 · 关键字">借用</span> <span class="t kw" data-k="kw" title="第19行 第14列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第19行 第17列 · 符号">)</span> <span class="t punct" data-k="punct" title="第19行 第19列 · 符号">-&gt;</span> <span class="t kw" data-k="kw" title="第19行 第22列 · 关键字">映射</span><span class="t punct" data-k="punct" title="第19行 第24列 · 符号">[</span><span class="t kw" data-k="kw" title="第19行 第25列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第19行 第28列 · 符号">,</span> <span class="t kw" data-k="kw" title="第19行 第30列 · 关键字">整数</span><span class="t punct" data-k="punct" title="第19行 第32列 · 符号">]</span> <span class="t punct" data-k="punct" title="第19行 第34列 · 符号">{</span>
+    <span class="t kw" data-k="kw" title="第20行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第20行 第8列 · 关键字">映射</span><span class="t punct" data-k="punct" title="第20行 第10列 · 符号">[</span><span class="t kw" data-k="kw" title="第20行 第11列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第20行 第14列 · 符号">,</span> <span class="t kw" data-k="kw" title="第20行 第16列 · 关键字">整数</span><span class="t punct" data-k="punct" title="第20行 第18列 · 符号">]</span> <span class="t ident" data-k="ident" title="第20行 第20列 · 标识符">表</span> <span class="t punct" data-k="punct" title="第20行 第22列 · 符号">=</span> <span class="t punct" data-k="punct" title="第20行 第24列 · 符号">{</span><span class="t punct" data-k="punct" title="第20行 第25列 · 符号">}</span>
+    <span class="t kw" data-k="kw" title="第21行 第5列 · 关键字">私有</span> <span class="t ident" data-k="ident" title="第21行 第8列 · 标识符">数组</span><span class="t punct" data-k="punct" title="第21行 第10列 · 符号">[</span><span class="t kw" data-k="kw" title="第21行 第11列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第21行 第14列 · 符号">]</span> <span class="t ident" data-k="ident" title="第21行 第16列 · 标识符">词们</span> <span class="t punct" data-k="punct" title="第21行 第19列 · 符号">=</span> <span class="t ident" data-k="ident" title="第21行 第21列 · 标识符">std</span><span class="t punct" data-k="punct" title="第21行 第24列 · 符号">.</span><span class="t ident" data-k="ident" title="第21行 第25列 · 标识符">string</span><span class="t punct" data-k="punct" title="第21行 第31列 · 符号">.</span><span class="t ident" data-k="ident" title="第21行 第32列 · 标识符">分割</span><span class="t punct" data-k="punct" title="第21行 第34列 · 符号">(</span><span class="t ident" data-k="ident" title="第21行 第35列 · 标识符">文本</span><span class="t punct" data-k="punct" title="第21行 第37列 · 符号">,</span> <span class="t str" data-k="str" title="第21行 第39列 · 字符串">&quot; &quot;</span><span class="t punct" data-k="punct" title="第21行 第42列 · 符号">)</span>
+
+    <span class="t kw" data-k="kw" title="第23行 第5列 · 关键字">对</span> <span class="t ident" data-k="ident" title="第23行 第7列 · 标识符">词</span> <span class="t kw" data-k="kw" title="第23行 第9列 · 关键字">在</span> <span class="t ident" data-k="ident" title="第23行 第11列 · 标识符">词们</span> <span class="t punct" data-k="punct" title="第23行 第14列 · 符号">{</span>
+        <span class="t kw" data-k="kw" title="第24行 第9列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第24行 第12列 · 关键字">字符串</span> <span class="t ident" data-k="ident" title="第24行 第16列 · 标识符">干净</span> <span class="t punct" data-k="punct" title="第24行 第19列 · 符号">=</span> <span class="t ident" data-k="ident" title="第24行 第21列 · 标识符">std</span><span class="t punct" data-k="punct" title="第24行 第24列 · 符号">.</span><span class="t ident" data-k="ident" title="第24行 第25列 · 标识符">string</span><span class="t punct" data-k="punct" title="第24行 第31列 · 符号">.</span><span class="t ident" data-k="ident" title="第24行 第32列 · 标识符">去空白</span><span class="t punct" data-k="punct" title="第24行 第35列 · 符号">(</span><span class="t ident" data-k="ident" title="第24行 第36列 · 标识符">std</span><span class="t punct" data-k="punct" title="第24行 第39列 · 符号">.</span><span class="t ident" data-k="ident" title="第24行 第40列 · 标识符">string</span><span class="t punct" data-k="punct" title="第24行 第46列 · 符号">.</span><span class="t ident" data-k="ident" title="第24行 第47列 · 标识符">小写</span><span class="t punct" data-k="punct" title="第24行 第49列 · 符号">(</span><span class="t ident" data-k="ident" title="第24行 第50列 · 标识符">词</span><span class="t punct" data-k="punct" title="第24行 第51列 · 符号">)</span><span class="t punct" data-k="punct" title="第24行 第52列 · 符号">)</span>
+        <span class="t kw" data-k="kw" title="第25行 第9列 · 关键字">如果</span> <span class="t punct" data-k="punct" title="第25行 第12列 · 符号">#</span><span class="t ident" data-k="ident" title="第25行 第13列 · 标识符">干净</span> <span class="t punct" data-k="punct" title="第25行 第16列 · 符号">==</span> <span class="t int" data-k="int" title="第25行 第19列 · 整数">0</span> <span class="t kw" data-k="kw" title="第25行 第21列 · 关键字">就</span> <span class="t punct" data-k="punct" title="第25行 第23列 · 符号">{</span> <span class="t kw" data-k="kw" title="第25行 第25列 · 关键字">继续</span> <span class="t punct" data-k="punct" title="第25行 第28列 · 符号">}</span>
+
+        <span class="t kw" data-k="kw" title="第27行 第9列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第27行 第12列 · 关键字">可空</span><span class="t punct" data-k="punct" title="第27行 第14列 · 符号">[</span><span class="t kw" data-k="kw" title="第27行 第15列 · 关键字">整数</span><span class="t punct" data-k="punct" title="第27行 第17列 · 符号">]</span> <span class="t ident" data-k="ident" title="第27行 第19列 · 标识符">旧</span> <span class="t punct" data-k="punct" title="第27行 第21列 · 符号">=</span> <span class="t ident" data-k="ident" title="第27行 第23列 · 标识符">表</span><span class="t punct" data-k="punct" title="第27行 第24列 · 符号">.</span><span class="t ident" data-k="ident" title="第27行 第25列 · 标识符">取</span><span class="t punct" data-k="punct" title="第27行 第26列 · 符号">(</span><span class="t ident" data-k="ident" title="第27行 第27列 · 标识符">干净</span><span class="t punct" data-k="punct" title="第27行 第29列 · 符号">)</span>
+        <span class="t kw" data-k="kw" title="第28行 第9列 · 关键字">如果</span> <span class="t ident" data-k="ident" title="第28行 第12列 · 标识符">旧</span> <span class="t punct" data-k="punct" title="第28行 第14列 · 符号">==</span> <span class="t kw" data-k="kw" title="第28行 第17列 · 关键字">空</span> <span class="t kw" data-k="kw" title="第28行 第19列 · 关键字">就</span> <span class="t punct" data-k="punct" title="第28行 第21列 · 符号">{</span>
+            <span class="t ident" data-k="ident" title="第29行 第13列 · 标识符">表</span><span class="t punct" data-k="punct" title="第29行 第14列 · 符号">.</span><span class="t ident" data-k="ident" title="第29行 第15列 · 标识符">插入</span><span class="t punct" data-k="punct" title="第29行 第17列 · 符号">(</span><span class="t ident" data-k="ident" title="第29行 第18列 · 标识符">干净</span><span class="t punct" data-k="punct" title="第29行 第20列 · 符号">,</span> <span class="t int" data-k="int" title="第29行 第22列 · 整数">1</span><span class="t punct" data-k="punct" title="第29行 第23列 · 符号">)</span>
+        <span class="t punct" data-k="punct" title="第30行 第9列 · 符号">}</span> <span class="t kw" data-k="kw" title="第30行 第11列 · 关键字">否则</span> <span class="t punct" data-k="punct" title="第30行 第14列 · 符号">{</span>
+            <span class="t ident" data-k="ident" title="第31行 第13列 · 标识符">表</span><span class="t punct" data-k="punct" title="第31行 第14列 · 符号">.</span><span class="t ident" data-k="ident" title="第31行 第15列 · 标识符">插入</span><span class="t punct" data-k="punct" title="第31行 第17列 · 符号">(</span><span class="t ident" data-k="ident" title="第31行 第18列 · 标识符">干净</span><span class="t punct" data-k="punct" title="第31行 第20列 · 符号">,</span> <span class="t ident" data-k="ident" title="第31行 第22列 · 标识符">旧</span><span class="t punct" data-k="punct" title="第31行 第23列 · 符号">.</span><span class="t ident" data-k="ident" title="第31行 第24列 · 标识符">取值</span><span class="t punct" data-k="punct" title="第31行 第26列 · 符号">(</span><span class="t punct" data-k="punct" title="第31行 第27列 · 符号">)</span> <span class="t punct" data-k="punct" title="第31行 第29列 · 符号">+</span> <span class="t int" data-k="int" title="第31行 第31列 · 整数">1</span><span class="t punct" data-k="punct" title="第31行 第32列 · 符号">)</span>
+        <span class="t punct" data-k="punct" title="第32行 第9列 · 符号">}</span>
+    <span class="t punct" data-k="punct" title="第33行 第5列 · 符号">}</span>
+    <span class="t kw" data-k="kw" title="第34行 第5列 · 关键字">返回</span> <span class="t ident" data-k="ident" title="第34行 第8列 · 标识符">表</span>
+<span class="t punct" data-k="punct" title="第35行 第1列 · 符号">}</span>
+
+-- 按次数从多到少排个榜
+<span class="t kw" data-k="kw" title="第38行 第1列 · 关键字">函数</span> <span class="t ident" data-k="ident" title="第38行 第4列 · 标识符">排行</span><span class="t punct" data-k="punct" title="第38行 第6列 · 符号">(</span><span class="t ident" data-k="ident" title="第38行 第7列 · 标识符">表</span><span class="t punct" data-k="punct" title="第38行 第8列 · 符号">:</span> <span class="t kw" data-k="kw" title="第38行 第10列 · 关键字">借用</span> <span class="t kw" data-k="kw" title="第38行 第13列 · 关键字">映射</span><span class="t punct" data-k="punct" title="第38行 第15列 · 符号">[</span><span class="t kw" data-k="kw" title="第38行 第16列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第38行 第19列 · 符号">,</span> <span class="t kw" data-k="kw" title="第38行 第21列 · 关键字">整数</span><span class="t punct" data-k="punct" title="第38行 第23列 · 符号">]</span><span class="t punct" data-k="punct" title="第38行 第24列 · 符号">)</span> <span class="t punct" data-k="punct" title="第38行 第26列 · 符号">-&gt;</span> <span class="t ident" data-k="ident" title="第38行 第29列 · 标识符">数组</span><span class="t punct" data-k="punct" title="第38行 第31列 · 符号">[</span><span class="t ident" data-k="ident" title="第38行 第32列 · 标识符">词频项</span><span class="t punct" data-k="punct" title="第38行 第35列 · 符号">]</span> <span class="t punct" data-k="punct" title="第38行 第37列 · 符号">{</span>
+    <span class="t kw" data-k="kw" title="第39行 第5列 · 关键字">私有</span> <span class="t ident" data-k="ident" title="第39行 第8列 · 标识符">数组</span><span class="t punct" data-k="punct" title="第39行 第10列 · 符号">[</span><span class="t ident" data-k="ident" title="第39行 第11列 · 标识符">词频项</span><span class="t punct" data-k="punct" title="第39行 第14列 · 符号">]</span> <span class="t ident" data-k="ident" title="第39行 第16列 · 标识符">项们</span> <span class="t punct" data-k="punct" title="第39行 第19列 · 符号">=</span> <span class="t punct" data-k="punct" title="第39行 第21列 · 符号">{</span><span class="t punct" data-k="punct" title="第39行 第22列 · 符号">}</span>
+    <span class="t kw" data-k="kw" title="第40行 第5列 · 关键字">对</span> <span class="t ident" data-k="ident" title="第40行 第7列 · 标识符">词</span><span class="t punct" data-k="punct" title="第40行 第8列 · 符号">,</span> <span class="t ident" data-k="ident" title="第40行 第10列 · 标识符">次数</span> <span class="t kw" data-k="kw" title="第40行 第13列 · 关键字">在</span> <span class="t ident" data-k="ident" title="第40行 第15列 · 标识符">表</span> <span class="t punct" data-k="punct" title="第40行 第17列 · 符号">{</span>
+        <span class="t ident" data-k="ident" title="第41行 第9列 · 标识符">项们</span><span class="t punct" data-k="punct" title="第41行 第11列 · 符号">.</span><span class="t ident" data-k="ident" title="第41行 第12列 · 标识符">追加</span><span class="t punct" data-k="punct" title="第41行 第14列 · 符号">(</span><span class="t punct" data-k="punct" title="第41行 第15列 · 符号">{</span> <span class="t kw" data-k="kw" title="第41行 第17列 · 关键字">复制</span> <span class="t ident" data-k="ident" title="第41行 第20列 · 标识符">词</span><span class="t punct" data-k="punct" title="第41行 第21列 · 符号">,</span> <span class="t ident" data-k="ident" title="第41行 第23列 · 标识符">次数</span> <span class="t punct" data-k="punct" title="第41行 第26列 · 符号">}</span><span class="t punct" data-k="punct" title="第41行 第27列 · 符号">)</span>
+    <span class="t punct" data-k="punct" title="第42行 第5列 · 符号">}</span>
+    <span class="t ident" data-k="ident" title="第43行 第5列 · 标识符">项们</span><span class="t punct" data-k="punct" title="第43行 第7列 · 符号">.</span><span class="t ident" data-k="ident" title="第43行 第8列 · 标识符">排序按</span><span class="t punct" data-k="punct" title="第43行 第11列 · 符号">(</span><span class="t kw" data-k="kw" title="第43行 第12列 · 关键字">函数</span><span class="t punct" data-k="punct" title="第43行 第14列 · 符号">(</span><span class="t ident" data-k="ident" title="第43行 第15列 · 标识符">甲</span><span class="t punct" data-k="punct" title="第43行 第16列 · 符号">:</span> <span class="t ident" data-k="ident" title="第43行 第18列 · 标识符">词频项</span><span class="t punct" data-k="punct" title="第43行 第21列 · 符号">,</span> <span class="t ident" data-k="ident" title="第43行 第23列 · 标识符">乙</span><span class="t punct" data-k="punct" title="第43行 第24列 · 符号">:</span> <span class="t ident" data-k="ident" title="第43行 第26列 · 标识符">词频项</span><span class="t punct" data-k="punct" title="第43行 第29列 · 符号">)</span> <span class="t punct" data-k="punct" title="第43行 第31列 · 符号">-&gt;</span> <span class="t kw" data-k="kw" title="第43行 第34列 · 关键字">整数</span> <span class="t punct" data-k="punct" title="第43行 第37列 · 符号">{</span>
+        <span class="t kw" data-k="kw" title="第44行 第9列 · 关键字">返回</span> <span class="t ident" data-k="ident" title="第44行 第12列 · 标识符">乙</span><span class="t punct" data-k="punct" title="第44行 第13列 · 符号">.</span><span class="t ident" data-k="ident" title="第44行 第14列 · 标识符">次数</span> <span class="t punct" data-k="punct" title="第44行 第17列 · 符号">-</span> <span class="t ident" data-k="ident" title="第44行 第19列 · 标识符">甲</span><span class="t punct" data-k="punct" title="第44行 第20列 · 符号">.</span><span class="t ident" data-k="ident" title="第44行 第21列 · 标识符">次数</span>
+    <span class="t punct" data-k="punct" title="第45行 第5列 · 符号">}</span><span class="t punct" data-k="punct" title="第45行 第6列 · 符号">)</span>
+    <span class="t kw" data-k="kw" title="第46行 第5列 · 关键字">返回</span> <span class="t ident" data-k="ident" title="第46行 第8列 · 标识符">项们</span>
+<span class="t punct" data-k="punct" title="第47行 第1列 · 符号">}</span>
+
+<span class="t kw" data-k="kw" title="第49行 第1列 · 关键字">函数</span> <span class="t ident" data-k="ident" title="第49行 第4列 · 标识符">main</span><span class="t punct" data-k="punct" title="第49行 第8列 · 符号">(</span><span class="t punct" data-k="punct" title="第49行 第9列 · 符号">)</span> <span class="t punct" data-k="punct" title="第49行 第11列 · 符号">-&gt;</span> <span class="t kw" data-k="kw" title="第49行 第14列 · 关键字">整数</span> <span class="t punct" data-k="punct" title="第49行 第17列 · 符号">{</span>
+    <span class="t kw" data-k="kw" title="第50行 第5列 · 关键字">私有</span> <span class="t ident" data-k="ident" title="第50行 第8列 · 标识符">数组</span><span class="t punct" data-k="punct" title="第50行 第10列 · 符号">[</span><span class="t kw" data-k="kw" title="第50行 第11列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第50行 第14列 · 符号">]</span> <span class="t ident" data-k="ident" title="第50行 第16列 · 标识符">参数</span> <span class="t punct" data-k="punct" title="第50行 第19列 · 符号">=</span> <span class="t ident" data-k="ident" title="第50行 第21列 · 标识符">std</span><span class="t punct" data-k="punct" title="第50行 第24列 · 符号">.</span><span class="t ident" data-k="ident" title="第50行 第25列 · 标识符">os</span><span class="t punct" data-k="punct" title="第50行 第27列 · 符号">.</span><span class="t ident" data-k="ident" title="第50行 第28列 · 标识符">参数</span><span class="t punct" data-k="punct" title="第50行 第30列 · 符号">(</span><span class="t punct" data-k="punct" title="第50行 第31列 · 符号">)</span>
+    <span class="t kw" data-k="kw" title="第51行 第5列 · 关键字">如果</span> <span class="t punct" data-k="punct" title="第51行 第8列 · 符号">#</span><span class="t ident" data-k="ident" title="第51行 第9列 · 标识符">参数</span> <span class="t punct" data-k="punct" title="第51行 第12列 · 符号">&lt;&lt;</span> <span class="t int" data-k="int" title="第51行 第15列 · 整数">2</span> <span class="t kw" data-k="kw" title="第51行 第17列 · 关键字">就</span> <span class="t punct" data-k="punct" title="第51行 第19列 · 符号">{</span>
+        <span class="t ident" data-k="ident" title="第52行 第9列 · 标识符">std</span><span class="t punct" data-k="punct" title="第52行 第12列 · 符号">.</span><span class="t ident" data-k="ident" title="第52行 第13列 · 标识符">io</span><span class="t punct" data-k="punct" title="第52行 第15列 · 符号">.</span><span class="t ident" data-k="ident" title="第52行 第16列 · 标识符">写错误</span><span class="t punct" data-k="punct" title="第52行 第19列 · 符号">(</span><span class="t str" data-k="str" title="第52行 第20列 · 字符串">&quot;用法：词频 &lt;文件&gt;&quot;</span><span class="t punct" data-k="punct" title="第52行 第32列 · 符号">)</span>
+        <span class="t kw" data-k="kw" title="第53行 第9列 · 关键字">返回</span> <span class="t int" data-k="int" title="第53行 第12列 · 整数">1</span>
+    <span class="t punct" data-k="punct" title="第54行 第5列 · 符号">}</span>
+
+    <span class="t kw" data-k="kw" title="第56行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第56行 第8列 · 关键字">结果</span><span class="t punct" data-k="punct" title="第56行 第10列 · 符号">[</span><span class="t kw" data-k="kw" title="第56行 第11列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第56行 第14列 · 符号">,</span> <span class="t kw" data-k="kw" title="第56行 第16列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第56行 第19列 · 符号">]</span> <span class="t ident" data-k="ident" title="第56行 第21列 · 标识符">读</span> <span class="t punct" data-k="punct" title="第56行 第23列 · 符号">=</span> <span class="t ident" data-k="ident" title="第56行 第25列 · 标识符">std</span><span class="t punct" data-k="punct" title="第56行 第28列 · 符号">.</span><span class="t ident" data-k="ident" title="第56行 第29列 · 标识符">fs</span><span class="t punct" data-k="punct" title="第56行 第31列 · 符号">.</span><span class="t ident" data-k="ident" title="第56行 第32列 · 标识符">读取文件</span><span class="t punct" data-k="punct" title="第56行 第36列 · 符号">(</span><span class="t ident" data-k="ident" title="第56行 第37列 · 标识符">参数</span><span class="t punct" data-k="punct" title="第56行 第39列 · 符号">[</span><span class="t int" data-k="int" title="第56行 第40列 · 整数">1</span><span class="t punct" data-k="punct" title="第56行 第41列 · 符号">]</span><span class="t punct" data-k="punct" title="第56行 第42列 · 符号">)</span>
+    <span class="t kw" data-k="kw" title="第57行 第5列 · 关键字">匹配</span> <span class="t ident" data-k="ident" title="第57行 第8列 · 标识符">读</span> <span class="t punct" data-k="punct" title="第57行 第10列 · 符号">{</span>
+        <span class="t kw" data-k="kw" title="第58行 第9列 · 关键字">例</span> <span class="t kw" data-k="kw" title="第58行 第11列 · 关键字">失败</span><span class="t punct" data-k="punct" title="第58行 第13列 · 符号">(</span><span class="t ident" data-k="ident" title="第58行 第14列 · 标识符">原因</span><span class="t punct" data-k="punct" title="第58行 第16列 · 符号">)</span><span class="t punct" data-k="punct" title="第58行 第17列 · 符号">:</span> <span class="t punct" data-k="punct" title="第58行 第19列 · 符号">{</span>
+            <span class="t ident" data-k="ident" title="第59行 第13列 · 标识符">std</span><span class="t punct" data-k="punct" title="第59行 第16列 · 符号">.</span><span class="t ident" data-k="ident" title="第59行 第17列 · 标识符">io</span><span class="t punct" data-k="punct" title="第59行 第19列 · 符号">.</span><span class="t ident" data-k="ident" title="第59行 第20列 · 标识符">写错误</span><span class="t punct" data-k="punct" title="第59行 第23列 · 符号">(</span><span class="t str" data-k="str" title="第59行 第24列 · 字符串">&quot;读取失败：&quot;</span> <span class="t punct" data-k="punct" title="第59行 第32列 · 符号">..</span> <span class="t ident" data-k="ident" title="第59行 第35列 · 标识符">原因</span><span class="t punct" data-k="punct" title="第59行 第37列 · 符号">)</span>
+            <span class="t kw" data-k="kw" title="第60行 第13列 · 关键字">返回</span> <span class="t int" data-k="int" title="第60行 第16列 · 整数">1</span>
+        <span class="t punct" data-k="punct" title="第61行 第9列 · 符号">}</span>
+        <span class="t kw" data-k="kw" title="第62行 第9列 · 关键字">例</span> <span class="t kw" data-k="kw" title="第62行 第11列 · 关键字">成功</span><span class="t punct" data-k="punct" title="第62行 第13列 · 符号">(</span><span class="t ident" data-k="ident" title="第62行 第14列 · 标识符">文本</span><span class="t punct" data-k="punct" title="第62行 第16列 · 符号">)</span><span class="t punct" data-k="punct" title="第62行 第17列 · 符号">:</span> <span class="t punct" data-k="punct" title="第62行 第19列 · 符号">{</span>
+            <span class="t kw" data-k="kw" title="第63行 第13列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第63行 第16列 · 关键字">映射</span><span class="t punct" data-k="punct" title="第63行 第18列 · 符号">[</span><span class="t kw" data-k="kw" title="第63行 第19列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第63行 第22列 · 符号">,</span> <span class="t kw" data-k="kw" title="第63行 第24列 · 关键字">整数</span><span class="t punct" data-k="punct" title="第63行 第26列 · 符号">]</span> <span class="t ident" data-k="ident" title="第63行 第28列 · 标识符">表</span> <span class="t punct" data-k="punct" title="第63行 第30列 · 符号">=</span> <span class="t ident" data-k="ident" title="第63行 第32列 · 标识符">统计</span><span class="t punct" data-k="punct" title="第63行 第34列 · 符号">(</span><span class="t kw" data-k="kw" title="第63行 第35列 · 关键字">借用</span> <span class="t ident" data-k="ident" title="第63行 第38列 · 标识符">文本</span><span class="t punct" data-k="punct" title="第63行 第40列 · 符号">)</span>
+            <span class="t kw" data-k="kw" title="第64行 第13列 · 关键字">私有</span> <span class="t ident" data-k="ident" title="第64行 第16列 · 标识符">数组</span><span class="t punct" data-k="punct" title="第64行 第18列 · 符号">[</span><span class="t ident" data-k="ident" title="第64行 第19列 · 标识符">词频项</span><span class="t punct" data-k="punct" title="第64行 第22列 · 符号">]</span> <span class="t ident" data-k="ident" title="第64行 第24列 · 标识符">榜</span> <span class="t punct" data-k="punct" title="第64行 第26列 · 符号">=</span> <span class="t ident" data-k="ident" title="第64行 第28列 · 标识符">排行</span><span class="t punct" data-k="punct" title="第64行 第30列 · 符号">(</span><span class="t kw" data-k="kw" title="第64行 第31列 · 关键字">借用</span> <span class="t ident" data-k="ident" title="第64行 第34列 · 标识符">表</span><span class="t punct" data-k="punct" title="第64行 第35列 · 符号">)</span>
+
+            <span class="t kw" data-k="kw" title="第66行 第13列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第66行 第16列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第66行 第19列 · 标识符">前</span> <span class="t punct" data-k="punct" title="第66行 第21列 · 符号">=</span> <span class="t int" data-k="int" title="第66行 第23列 · 整数">10</span>
+            <span class="t kw" data-k="kw" title="第67行 第13列 · 关键字">如果</span> <span class="t punct" data-k="punct" title="第67行 第16列 · 符号">#</span><span class="t ident" data-k="ident" title="第67行 第17列 · 标识符">榜</span> <span class="t punct" data-k="punct" title="第67行 第19列 · 符号">&lt;&lt;</span> <span class="t ident" data-k="ident" title="第67行 第22列 · 标识符">前</span> <span class="t kw" data-k="kw" title="第67行 第24列 · 关键字">就</span> <span class="t punct" data-k="punct" title="第67行 第26列 · 符号">{</span> <span class="t ident" data-k="ident" title="第67行 第28列 · 标识符">前</span> <span class="t punct" data-k="punct" title="第67行 第30列 · 符号">=</span> <span class="t punct" data-k="punct" title="第67行 第32列 · 符号">#</span><span class="t ident" data-k="ident" title="第67行 第33列 · 标识符">榜</span> <span class="t punct" data-k="punct" title="第67行 第35列 · 符号">}</span>
+            <span class="t kw" data-k="kw" title="第68行 第13列 · 关键字">对</span> <span class="t ident" data-k="ident" title="第68行 第15列 · 标识符">i</span><span class="t punct" data-k="punct" title="第68行 第16列 · 符号">:</span> <span class="t int" data-k="int" title="第68行 第18列 · 整数">0</span><span class="t punct" data-k="punct" title="第68行 第19列 · 符号">~</span><span class="t punct" data-k="punct" title="第68行 第20列 · 符号">(</span><span class="t ident" data-k="ident" title="第68行 第21列 · 标识符">前</span> <span class="t punct" data-k="punct" title="第68行 第23列 · 符号">-</span> <span class="t int" data-k="int" title="第68行 第25列 · 整数">1</span><span class="t punct" data-k="punct" title="第68行 第26列 · 符号">)</span> <span class="t punct" data-k="punct" title="第68行 第28列 · 符号">{</span>
+                <span class="t ident" data-k="ident" title="第69行 第17列 · 标识符">std</span><span class="t punct" data-k="punct" title="第69行 第20列 · 符号">.</span><span class="t ident" data-k="ident" title="第69行 第21列 · 标识符">io</span><span class="t punct" data-k="punct" title="第69行 第23列 · 符号">.</span><span class="t ident" data-k="ident" title="第69行 第24列 · 标识符">打印行</span><span class="t punct" data-k="punct" title="第69行 第27列 · 符号">(</span><span class="t ident" data-k="ident" title="第69行 第28列 · 标识符">榜</span><span class="t punct" data-k="punct" title="第69行 第29列 · 符号">[</span><span class="t ident" data-k="ident" title="第69行 第30列 · 标识符">i</span><span class="t punct" data-k="punct" title="第69行 第31列 · 符号">]</span><span class="t punct" data-k="punct" title="第69行 第32列 · 符号">.</span><span class="t ident" data-k="ident" title="第69行 第33列 · 标识符">词</span> <span class="t punct" data-k="punct" title="第69行 第35列 · 符号">..</span> <span class="t str" data-k="str" title="第69行 第38列 · 字符串">&quot;：&quot;</span> <span class="t punct" data-k="punct" title="第69行 第42列 · 符号">..</span> <span class="t kw" data-k="kw" title="第69行 第45列 · 关键字">字符串</span><span class="t punct" data-k="punct" title="第69行 第48列 · 符号">(</span><span class="t ident" data-k="ident" title="第69行 第49列 · 标识符">榜</span><span class="t punct" data-k="punct" title="第69行 第50列 · 符号">[</span><span class="t ident" data-k="ident" title="第69行 第51列 · 标识符">i</span><span class="t punct" data-k="punct" title="第69行 第52列 · 符号">]</span><span class="t punct" data-k="punct" title="第69行 第53列 · 符号">.</span><span class="t ident" data-k="ident" title="第69行 第54列 · 标识符">次数</span><span class="t punct" data-k="punct" title="第69行 第56列 · 符号">)</span><span class="t punct" data-k="punct" title="第69行 第57列 · 符号">)</span>
+            <span class="t punct" data-k="punct" title="第70行 第13列 · 符号">}</span>
+            <span class="t kw" data-k="kw" title="第71行 第13列 · 关键字">返回</span> <span class="t int" data-k="int" title="第71行 第16列 · 整数">0</span>
+        <span class="t punct" data-k="punct" title="第72行 第9列 · 符号">}</span>
+    <span class="t punct" data-k="punct" title="第73行 第5列 · 符号">}</span>
+<span class="t punct" data-k="punct" title="第74行 第1列 · 符号">}</span>
+
+-- 下面这些是给词法分析器准备的各种花样，正常程序里不会这么写
+
+<span class="t kw" data-k="kw" title="第78行 第1列 · 关键字">常量</span> <span class="t kw" data-k="kw" title="第78行 第4列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第78行 第7列 · 标识符">掩码</span> <span class="t punct" data-k="punct" title="第78行 第10列 · 符号">=</span> <span class="t int" data-k="int" title="第78行 第12列 · 整数">0b1111_0000</span>
+<span class="t kw" data-k="kw" title="第79行 第1列 · 关键字">常量</span> <span class="t kw" data-k="kw" title="第79行 第4列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第79行 第7列 · 标识符">大数</span> <span class="t punct" data-k="punct" title="第79行 第10列 · 符号">=</span> <span class="t int" data-k="int" title="第79行 第12列 · 整数">1_000_000</span>
+<span class="t kw" data-k="kw" title="第80行 第1列 · 关键字">常量</span> <span class="t kw" data-k="kw" title="第80行 第4列 · 关键字">浮点</span> <span class="t ident" data-k="ident" title="第80行 第7列 · 标识符">圆周率</span> <span class="t punct" data-k="punct" title="第80行 第11列 · 符号">=</span> <span class="t float" data-k="float" title="第80行 第13列 · 浮点">3.14159</span>
+<span class="t kw" data-k="kw" title="第81行 第1列 · 关键字">常量</span> <span class="t kw" data-k="kw" title="第81行 第4列 · 关键字">浮点</span> <span class="t ident" data-k="ident" title="第81行 第7列 · 标识符">极小</span> <span class="t punct" data-k="punct" title="第81行 第10列 · 符号">=</span> <span class="t float" data-k="float" title="第81行 第12列 · 浮点">2.5e-3</span>
+<span class="t kw" data-k="kw" title="第82行 第1列 · 关键字">常量</span> <span class="t kw" data-k="kw" title="第82行 第4列 · 关键字">字符串</span> <span class="t ident" data-k="ident" title="第82行 第8列 · 标识符">长文本</span> <span class="t punct" data-k="punct" title="第82行 第12列 · 符号">=</span> <span class="t str" data-k="str" title="第82行 第14列 · 字符串">[[
+    这里可以随便写，换行、引号 &quot; 都不用转义
+]]</span>
+
+<span class="t kw" data-k="kw" title="第86行 第1列 · 关键字">函数</span> <span class="t ident" data-k="ident" title="第86行 第4列 · 标识符">演示位运算</span><span class="t punct" data-k="punct" title="第86行 第9列 · 符号">(</span><span class="t punct" data-k="punct" title="第86行 第10列 · 符号">)</span> <span class="t punct" data-k="punct" title="第86行 第12列 · 符号">-&gt;</span> <span class="t kw" data-k="kw" title="第86行 第15列 · 关键字">整数</span> <span class="t punct" data-k="punct" title="第86行 第18列 · 符号">{</span>
+    <span class="t kw" data-k="kw" title="第87行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第87行 第8列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第87行 第11列 · 标识符">甲</span> <span class="t punct" data-k="punct" title="第87行 第13列 · 符号">=</span> <span class="t int" data-k="int" title="第87行 第15列 · 整数">5</span> <span class="t punct" data-k="punct" title="第87行 第17列 · 符号">^^</span> <span class="t int" data-k="int" title="第87行 第20列 · 整数">3</span>          -- 位异或，结果是 6
+    <span class="t kw" data-k="kw" title="第88行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第88行 第8列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第88行 第11列 · 标识符">乙</span> <span class="t punct" data-k="punct" title="第88行 第13列 · 符号">=</span> <span class="t punct" data-k="punct" title="第88行 第15列 · 符号">~~</span><span class="t int" data-k="int" title="第88行 第17列 · 整数">5</span>             -- 按位取反，结果是 -6
+    <span class="t kw" data-k="kw" title="第89行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第89行 第8列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第89行 第11列 · 标识符">丙</span> <span class="t punct" data-k="punct" title="第89行 第13列 · 符号">=</span> <span class="t int" data-k="int" title="第89行 第15列 · 整数">5</span> <span class="t punct" data-k="punct" title="第89行 第17列 · 符号">&lt;&lt;&lt;</span> <span class="t int" data-k="int" title="第89行 第21列 · 整数">2</span>         -- 左移两位，结果是 20
+    <span class="t kw" data-k="kw" title="第90行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第90行 第8列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第90行 第11列 · 标识符">丁</span> <span class="t punct" data-k="punct" title="第90行 第13列 · 符号">=</span> <span class="t int" data-k="int" title="第90行 第15列 · 整数">20</span> <span class="t punct" data-k="punct" title="第90行 第18列 · 符号">&gt;&gt;&gt;</span> <span class="t int" data-k="int" title="第90行 第22列 · 整数">1</span>        -- 右移一位，结果是 10
+    <span class="t kw" data-k="kw" title="第91行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第91行 第8列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第91行 第11列 · 标识符">戊</span> <span class="t punct" data-k="punct" title="第91行 第13列 · 符号">=</span> <span class="t int" data-k="int" title="第91行 第15列 · 整数">7</span> <span class="t punct" data-k="punct" title="第91行 第17列 · 符号">//</span> <span class="t int" data-k="int" title="第91行 第20列 · 整数">2</span>          -- 整除，结果是 3
+    <span class="t kw" data-k="kw" title="第92行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第92行 第8列 · 关键字">整数</span> <span class="t ident" data-k="ident" title="第92行 第11列 · 标识符">己</span> <span class="t punct" data-k="punct" title="第92行 第13列 · 符号">=</span> <span class="t int" data-k="int" title="第92行 第15列 · 整数">7</span> <span class="t punct" data-k="punct" title="第92行 第17列 · 符号">%</span> <span class="t int" data-k="int" title="第92行 第19列 · 整数">2</span>           -- 取余，结果是 1
+    <span class="t kw" data-k="kw" title="第93行 第5列 · 关键字">私有</span> <span class="t kw" data-k="kw" title="第93行 第8列 · 关键字">浮点</span> <span class="t ident" data-k="ident" title="第93行 第11列 · 标识符">庚</span> <span class="t punct" data-k="punct" title="第93行 第13列 · 符号">=</span> <span class="t int" data-k="int" title="第93行 第15列 · 整数">2</span> <span class="t punct" data-k="punct" title="第93行 第17列 · 符号">^</span> <span class="t int" data-k="int" title="第93行 第19列 · 整数">10</span>          -- 乘方，结果是 1024.0
+    <span class="t kw" data-k="kw" title="第94行 第5列 · 关键字">返回</span> <span class="t ident" data-k="ident" title="第94行 第8列 · 标识符">甲</span> <span class="t punct" data-k="punct" title="第94行 第10列 · 符号">+</span> <span class="t ident" data-k="ident" title="第94行 第12列 · 标识符">乙</span> <span class="t punct" data-k="punct" title="第94行 第14列 · 符号">+</span> <span class="t ident" data-k="ident" title="第94行 第16列 · 标识符">丙</span> <span class="t punct" data-k="punct" title="第94行 第18列 · 符号">+</span> <span class="t ident" data-k="ident" title="第94行 第20列 · 标识符">丁</span> <span class="t punct" data-k="punct" title="第94行 第22列 · 符号">+</span> <span class="t ident" data-k="ident" title="第94行 第24列 · 标识符">戊</span> <span class="t punct" data-k="punct" title="第94行 第26列 · 符号">+</span> <span class="t ident" data-k="ident" title="第94行 第28列 · 标识符">己</span>
+<span class="t punct" data-k="punct" title="第95行 第1列 · 符号">}</span>
+
+--[[
+    块注释：整段都能藏起来
+    模块 假的
+    函数 假函数() { 返回 0 }
+]]
+</pre>
+
+  <div class="foot">
+    颜色含义：<span class="kw">关键字</span> ·
+    <span class="ident">名字</span> ·
+    <span class="int">数字</span> ·
+    <span class="str">文字</span> ·
+    <span class="punct">符号</span>。
+    空格、缩进、注释 <code>--</code> 都被丢弃了，不会出现在任何色块里。
+  </div>
+</div>
+<script>
+let 当前 = null;
+function filter(btn) {
+  const k = btn.dataset.k;
+  const body = document.body;
+  if (当前 === k) {
+    当前 = null; body.classList.remove('focus');
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+    document.querySelectorAll('.t').forEach(t => t.classList.remove('match'));
+    return;
+  }
+  当前 = k;
+  body.classList.add('focus');
+  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.k === k));
+  document.querySelectorAll('.t').forEach(t => t.classList.toggle('match', t.dataset.k === k));
+}
+</script>
+</body>
+</html>
