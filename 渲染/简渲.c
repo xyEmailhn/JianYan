@@ -178,8 +178,7 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    printf("简渲 · %d×%d · %d 采样 · %.1f 秒内出图\n",
-           s.宽, s.高, s.采样, 0.0);
+    printf("简渲 · %d×%d · %d 采样 · %d 物体\n", s.宽, s.高, s.采样, s.物数);
     fflush(stdout);
 
     渲染(&s, 缓);
