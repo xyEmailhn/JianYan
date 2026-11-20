@@ -1953,6 +1953,10 @@ static void 备好语法器(语法器 *P, 词 *词们, int 词数, const char *�
     P->文件名 = 文件名;
 }
 
+/* 下一棒（语义分析）要把这个文件整个 #include 进去复用解析结果。
+ * 它定义 简_只要语法 之后，主函数和"打印树"这些只有命令行才用的东西就不再编进去。 */
+#ifndef 简_只要语法
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -2072,3 +2076,5 @@ int main(int argc, char **argv)
     free(源);
     return 失败 ? 1 : 0;
 }
+
+#endif /* 简_只要语法 */
