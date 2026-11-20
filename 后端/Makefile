@@ -4,6 +4,7 @@
 #   make 最小      体积最小（musl 静态）
 #   make 测试      跑全部测试用例
 #   make 示例      编译并运行全部示例
+#   make 出图      跑 出图.sh：静帧 + 海报 + 动画
 #   make 干净      清掉产物
 
 CC = gcc
@@ -13,7 +14,7 @@ ZIG = $(shell command -v zig 2>/dev/null || ls /usr/local/lib/python3*/dist-pack
 快 = -O3 -flto -fno-plt -fno-asynchronous-unwind-tables -fno-unwind-tables \
      -fno-ident -ffunction-sections -Wl,--gc-sections
 
-.PHONY: all 最小 测试 示例 干净
+.PHONY: all 最小 测试 示例 出图 干净
 
 all: 简编译
 
@@ -34,6 +35,9 @@ all: 简编译
 	    /tmp/简言示例 || true; \
 	    echo; \
 	done
+
+出图: 简编译
+	@bash 出图.sh
 
 干净:
 	rm -f 简编译 简编译_最小 简编译_静态
