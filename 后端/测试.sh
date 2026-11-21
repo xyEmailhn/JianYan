@@ -36,4 +36,40 @@ done
 
 echo
 echo "通过 $PASS，失败 $FAIL"
-[ "$FAIL" -eq 0 ]
+
+# ---------------------------------------------------------------- 原生后端对拍 --
+# 原生后端（IR → 汇编 → as → ld）目前只覆盖 整数/布尔/字符串/控制流/调用。
+# 所以这里不是「必须全过」，而是「编得出来就必须跑对」：
+#   编不出来 → 记一个 ·，不算失败；
+#   编得出来 → 输出必须和期望文件逐字节一致，错一个字就是失败。
+# 这条规矩很重要：能编但编错，比编不出来危险得多。
+NPASS=0
+NFAIL=0
+NSKIP=0
+echo
+echo "=== 原生后端对拍 ==="
+for f in 测试/*.jy; do
+    [ -f "$f" ] || continue
+    NAME=$(basename "$f" .jy)
+    WANT="测试/期望/$NAME.txt"
+    [ -f "$WANT" ] || continue
+    TMPN=/tmp/jy_native_$$
+    if ! ./简编译 "$f" -n -o "$TMPN" >/dev/null 2>&1; then
+        echo "· $NAME —— 原生后端还不支持，跳过"
+        NSKIP=$((NSKIP + 1))
+        continue
+    fi
+    ACTN=$(timeout 20 "$TMPN" 2>&1)
+    rm -f "$TMPN"
+    if [ "$ACTN" = "$(cat "$WANT")" ]; then
+        echo "✓ 原生 $NAME"
+        NPASS=$((NPASS + 1))
+    else
+        echo "✗ 原生 $NAME —— 与 C 后端不一致"
+        diff <(echo "$ACTN") "$WANT" | head -20
+        NFAIL=$((NFAIL + 1))
+    fi
+done
+echo "原生：过 $NPASS，错 $NFAIL，跳过 $NSKIP"
+
+[ "$FAIL" -eq 0 ] && [ "$NFAIL" -eq 0 ]

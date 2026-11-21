@@ -679,5 +679,100 @@ F(1000) 位数 209
   <tr><td>测试</td><td>14 个用例，全过</td></tr>
 </table>
 
+
+<h2>然后它甩掉了 gcc <small>v0.11：原生后端，IR 直接变汇编</small></h2>
+<p>
+  前面所有版本都是 <code>IR → C → gcc → 机器码</code>。这一版加了第二条路：
+  <code>IR → x86-64 汇编 → as → ld</code>。产物里没有一行 C，
+  连 libc 都没链——运行时是裸 <code>syscall</code>。
+</p>
+<p>
+  第一版故意做得很笨：每个 IR 值一个固定栈槽，不分配寄存器、不做活跃变量分析。
+  慢是必然的，但它先钉住一件事——<strong>正确</strong>。
+</p>
+
+<div class="cols" style="margin-top:18px">
+  <div class="card">
+    <h3>同一个斐波那契 <b>左边 C，右边汇编</b></h3>
+    <pre>/* C 后端：值就是变量 */
+long long v8 = v1;
+long long v9 = 2LL;
+v10 = v8 &lt; v9;
+if (v10) goto L1; else goto L2;
+
+/* 原生后端：值在栈槽里 */
+movq -16(%rbp), %rax
+movq %rax, -32(%rbp)
+movq $2, -48(%rbp)
+movq -32(%rbp), %rax
+movq -48(%rbp), %rcx
+cmpq %rcx, %rax
+setl %al
+movzbq %al, %rax
+movq %rax, -64(%rbp)
+cmpq $0, -64(%rbp)
+jne .L0_1
+jmp .L0_2</pre>
+    <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+      一行 C 对五行汇编。多出来的四行全是「搬进搬出栈槽」——
+      <b>这正是寄存器分配将来要消掉的</b>。
+    </div>
+  </div>
+  <div class="card">
+    <h3>产物对比 <b>同一个程序，两条路</b></h3>
+    <pre>$ file 程序 && ldd 程序
+程序: ELF 64-bit LSB executable, x86-64,
+      statically linked
+程序: not a dynamic executable
+
+$ ls -l
+16176  原生_c        ← 经过 gcc -O2
+ 9376  原生_n        ← 原生后端，未 strip
+
+$ 简编译 程序.jy -S 程序.s
+   514 行汇编
+   552 行 C        ← 差不多，但少了一层</pre>
+    <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+      原生版更小，不是因为优化得好，是因为它<b>什么都没有</b>：没有 libc 启动代码、
+      没有 stdio 缓冲区、没有 printf 那一整套格式化引擎。等浮点和容器补上，
+      这个优势会慢慢消失——那时候才轮到谈寄存器分配。
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>现在能编译什么 <b>覆盖是有边界的，越界会明确报错</b></h3>
+  <table>
+    <tr><th>能力</th><th>状态</th><th>说明</th></tr>
+    <tr><td>整数、比较、位运算、<code>//</code> <code>%</code> <code>^</code></td><td>✅</td><td>含负数的截断语义，与 C 一致</td></tr>
+    <tr><td>布尔、<code>与</code>/<code>或</code> 短路</td><td>✅</td><td>短路就是控制流，天然正确</td></tr>
+    <tr><td>字符串常量、<code>#</code>、<code>..</code>、打印</td><td>✅</td><td>堆上拼接，1MB 只进不退</td></tr>
+    <tr><td><code>如果</code> / <code>当</code> / 递归 / 函数调用</td><td>✅</td><td>≤6 个整型参数走 SysV 寄存器</td></tr>
+    <tr><td>浮点</td><td>⬜</td><td>要 SSE，还得自己写 <code>%g</code></td></tr>
+    <tr><td>组 / 映射 / 结构 / 枚举 / 结果</td><td>⬜</td><td>要堆上的对象布局</td></tr>
+    <tr><td>图 / 声音 / 大数</td><td>⬜</td><td>要第三方库的 ABI</td></tr>
+  </table>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    不支持的会明确报错并指到指令，不会悄悄算错：
+    <code>原生后端还不支持：这类类型的实参 / 函数：说 / 指令：调用</code>
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>对拍 <b>能编出来，就必须跑对</b></h3>
+  <pre>$ bash 测试.sh
+...
+=== 原生后端对拍 ===
+✓ 原生 原生      斐波那契(20)=6765 · 1..100=5050 · 拼接"简言!"
+✓ 原生 短路      与/或 四象限 · 当 里用 与
+✓ 原生 大数覆盖  用户函数顶掉内置
+原生：过 3，错 0，跳过 14</pre>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    规矩：编不出来记一个 <code>·</code>，<b>不算失败</b>；
+    编得出来，输出必须和 C 后端的期望文件逐字节一致，错一个字就失败。
+    能编但编错，比编不出来危险得多——后者你马上就知道。
+  </div>
+</div>
+
 </body>
 </html>

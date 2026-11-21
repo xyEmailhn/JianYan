@@ -2712,6 +2712,9 @@ static const char *找图库(void)
     return NULL;
 }
 
+/* 原生后端：IR → x86-64 汇编 → as → ld。放在这里是要晚于 参数个数 / 找函数。 */
+#include "简汇编.c"
+
 static void 用法(void)
 {
     fputs(
@@ -2719,7 +2722,9 @@ static void 用法(void)
         "  简编译 文件.jy              生成 a.out\n"
         "  简编译 文件.jy -o 名字      生成指定名字\n"
         "  简编译 文件.jy -c           只出 C 代码（stdout）\n"
-        "  简编译 文件.jy -c 文件.c    只出 C 代码（写文件）\n",
+        "  简编译 文件.jy -c 文件.c    只出 C 代码（写文件）\n"
+        "  简编译 文件.jy -n           走原生后端：IR → 汇编 → as → ld，不经过 C\n"
+        "  简编译 文件.jy -S 文件.s    只出汇编（原生后端）\n",
         stderr);
 }
 
@@ -2731,12 +2736,20 @@ int main(int argc, char **argv)
     const char *输出 = "a.out";
     const char *C文件 = NULL;
     int 只要C = 0;
+    int 原生 = 0;
+    const char *汇编文件 = NULL;
+    int 只要汇编 = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0) { if (++i < argc) 输出 = argv[i]; }
         else if (strcmp(argv[i], "-c") == 0) {
             只要C = 1;
             if (i + 1 < argc && argv[i + 1][0] != '-') C文件 = argv[++i];
+        }
+        else if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--原生") == 0) 原生 = 1;
+        else if (strcmp(argv[i], "-S") == 0) {
+            原生 = 1; 只要汇编 = 1;
+            if (i + 1 < argc && argv[i + 1][0] != '-') 汇编文件 = argv[++i];
         }
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             用法();
@@ -2764,6 +2777,42 @@ int main(int argc, char **argv)
         fprintf(stderr, "语义检查没通过，不生成代码\n");
         打印诊断();
         return 1;
+    }
+
+    /* ---- 原生后端：IR → 汇编 → as → ld，全程不经过 C ---- */
+    if (原生) {
+        if (只要汇编) {
+            出 = 汇编文件 ? fopen(汇编文件, "w") : stdout;
+            if (!出) { fprintf(stderr, "写不了 %s\n", 汇编文件); return 1; }
+            int 好 = 汇_汇编(根);
+            if (汇编文件) fclose(出);
+            return 好 ? 0 : 1;
+        }
+
+        char s路径[512], o路径[512];
+        snprintf(s路径, sizeof(s路径), "/tmp/简言_%d.s", (int)getpid());
+        snprintf(o路径, sizeof(o路径), "/tmp/简言_%d.o", (int)getpid());
+        出 = fopen(s路径, "w");
+        if (!出) { fprintf(stderr, "写不了临时文件\n"); return 1; }
+        int 好 = 汇_汇编(根);
+        fclose(出);
+        if (!好) { remove(s路径); return 1; }
+
+        char 命令[2048];
+        snprintf(命令, sizeof(命令), "as -o '%s' '%s' 2>&1", o路径, s路径);
+        if (system(命令) != 0) {
+            fprintf(stderr, "汇编失败。中间产物留着，自己看：\n"
+                            "  as -o /tmp/x.o %s\n", s路径);
+            return 1;
+        }
+        snprintf(命令, sizeof(命令), "ld -o '%s' '%s' -e _start 2>&1", 输出, o路径);
+        if (system(命令) != 0) {
+            fprintf(stderr, "链接失败。目标文件在 %s\n", o路径);
+            return 1;
+        }
+        remove(s路径);
+        remove(o路径);
+        return 0;
     }
 
     /* ---- 出 C ---- */
