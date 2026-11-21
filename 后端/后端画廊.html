@@ -874,5 +874,81 @@ subq  %rcx, %rax         ; 贴回符号</pre>
   </div>
 </div>
 
+<h2>然后它开始写自己的说明书 <small>v0.13：一部教程，顺手补掉六个洞</small></h2>
+<p>
+  规范五万字，是写给实现者看的：类型规则怎么定、IR 怎么降、ELF 怎么标。
+  想学怎么用的人翻开第一页，读到第三页就走了。所以这一版写了另一份东西——
+  <code>教程/</code>，十六个章节，从"打印一行字"讲到"产物怎么小一半"。
+</p>
+<p>
+  写法照旧是一条纪律：<strong>每章配一个能直接编译运行的例子</strong>。
+  例子的输出存在 <code>教程/期望/</code>，<code>bash 教程/跑.sh</code>
+  编译、运行、逐字节比对，一条不过就红。于是写书变成了一次覆盖测试——
+  书里说"这个方法返回 <code>T 组</code>"，那就得真的编一遍。
+  <strong>六个洞就是这么照出来的。</strong>
+</p>
+
+<div class="card" style="margin-top:18px">
+  <h3>写书时撞上的六个洞 <b>文档说有，编译器没接</b></h3>
+  <table>
+    <tr><th>章节</th><th>写下去报什么</th><th>真因</th></tr>
+    <tr><td>07 组与映射</td><td><code>组.复制()</code> 报"要 整数 组，给的是 整数"</td><td>读签名只吃基本类型，<code>-&gt; @ 组</code> 的后缀留在串里没人接</td></tr>
+    <tr><td>04 字符串</td><td><code>文本.切分(",")</code> 报"不认识的类型 <code>未知</code>"，连行号都没有</td><td>内置表没给字符串设"元素类型"，于是它去找 <code>未知 组</code></td></tr>
+    <tr><td>11 可空</td><td><code>如果 a.有值 就</code> 生成的 C 报 "request for member 'n'"</td><td>属性分支只处理了字符串形态的可空（<code>(指针,长度)</code>），其余是裸字</td></tr>
+    <tr><td>11 结果</td><td><code>r.或默认(0)</code> 报"后端还没实现方法"</td><td>语义表里有签名，方法分派里漏了一档</td></tr>
+    <tr><td>05 循环</td><td><code>循环 { … 如果 次&gt;=3 就 { 打断 } }</code> 输出 <b>1</b></td><td>降循环时尾块填了 0，<code>打断</code> 于是跳回块 0——函数开头，重头再来</td></tr>
+    <tr><td>08 结构与方法</td><td><code>实现 圆 为 形状 { 函数 面积() … }</code> 报 "too many arguments"</td><td>方法没有 <code>自身</code> 形参，调用处却老老实实传了对象</td></tr>
+  </table>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    前五个都是"少一行"。第六个不是：方法这一套在原计划里靠"隐式自身"混过去，
+    真写起来才发现后端只认形参。<b>修法在 IR 层</b>——给方法补一个第 0 形参
+    <code>自身</code>，把方法体里的裸字段名改写成 <code>自身.字段</code>，
+    再按"有没有改字段"决定它是 <code>借用</code> 还是 <code>可变借用</code>。
+    这样后端完全不知道"这是方法"，它只看见一个多传了一个参数的普通函数。
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>例子长什么样 <b>第十三章：合成一段 440Hz 的正弦</b></h3>
+  <pre>私有 声音 波 = 新建声音(4000, 8000, 1)
+私有 整数 帧 = 0
+当 帧 &lt;&lt; 波.帧数 就 {
+    私有 浮点 t = 浮点(帧) / 浮点(波.采样率)
+    波.设(帧, 0, 0.6 * 正弦(2.0 * 3.14159265 * 440.0 * t))
+    波.混(帧, 0, 0.2 * 正弦(2.0 * 3.14159265 * 880.0 * t))
+    帧 = 帧 + 1
+}
+私有 声音 成品 = 波.归一化()
+私有 结果[空值, 字符串] r = 成品.存("正弦.wav")</pre>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    21 行，出 0.5 秒的 WAV：440Hz 基音叠一个 880Hz 泛音，再归一化。
+    全书十四个例子都这个尺度——短到能在一屏里读完，又真的会产出东西。
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>跑一遍 <b>十分钟从零到能改</b></h3>
+  <pre>$ make -C 第三方 &amp;&amp; make -C 后端        # 12 秒
+$ bash 教程/跑.sh
+✓ 01-你好
+✓ 02-类型
+…
+✓ 14-后端
+教程例子：过 14，错 0
+
+$ python3 教程/生成书.py
+写到 教程/教程.html（123.6 KB）</pre>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    最后那一步把十六个 Markdown 拼成单文件网页：米色纸面、宋体正文、粘性目录，
+    没有外部依赖，拷到哪儿都能读。
+  </div>
+</div>
+
+<p style="margin-top:22px">
+  <strong>写文档是最好的测试。</strong> 你不可能一边写"该方法返回 <code>T 组</code>"
+  一边发现它其实返回 <code>T</code>——除非你真的把那段代码跑了一遍。
+  这一轮改的六处，没有一处是读代码读出来的。
+</p>
+
 </body>
 </html>
