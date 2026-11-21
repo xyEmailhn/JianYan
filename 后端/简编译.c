@@ -37,6 +37,7 @@
 #include "../中间/ir.c"
 
 #include <stdint.h>
+#include <unistd.h>
 
 /* ------------------------------------------------------------ 输出缓冲 -- */
 
@@ -64,6 +65,7 @@ static const char *C型(类型 *t)
     switch (t->种) {
     case 型_浮点:   return "double";
     case 型_字符串: return "简字";
+    case 型_图:     return "简图";
     case 型_组:     return "简组";
     case 型_映射:   return "简映";
     case 型_结果:   return "简果";
@@ -467,11 +469,18 @@ static void 写运行时(void)
     行("   载荷类型不同，C 里没法用同一个静态类型装下两者。");
     行("   取用时按目标类型 sizeof 拷回来，编译器保证类型对得上。 */");
     行("typedef struct { int 成; char *p; int 宽; } 简果;");
+    行("/* 结果 的载荷缓冲固定 128 字节，不按实际宽度分配。");
+    行("   原因：键和值可能是不同的类型（结果[图, 字符串]，一个 24 字节一个 16 字节），");
+    行("   构造时只知道存的这一头有多宽，取值时却按另一头拷。");
+    行("   按实际宽度 malloc 的话，取值那一侧会读到堆上的相邻字节——");
+    行("   整数结果偶尔是个随机数，查起来极难。多占 128 字节买个安心。 */");
     行("static 简果 简_果造(int 成, const void *v, int 宽) {");
-    行("    简果 g; g.成 = 成; g.宽 = 宽;");
-    行("    g.p = (char *)malloc((size_t)(宽 > 0 ? 宽 : 1));");
+    行("    简果 g; g.成 = 成;");
+    行("    if (宽 < 0) 宽 = 0; if (宽 > 128) 宽 = 128;");
+    行("    g.宽 = 宽;");
+    行("    g.p = (char *)calloc(128, 1);");
     行("    if (!g.p) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
-    行("    if (宽 > 0 && v) memcpy(g.p, v, (size_t)宽); else memset(g.p, 0, 1);");
+    行("    if (宽 > 0 && v) memcpy(g.p, v, (size_t)宽);");
     行("    return g;");
     行("}");
     行("");
@@ -585,6 +594,48 @@ static void 写运行时(void)
     行("    int64_t 起 = j;");
     行("    j++; while (j < s.n && (s.p[j] & 0xC0) == 0x80) j++;");
     行("    return 简_字(s.p + 起, j - 起);");
+    行("}");
+    行("");
+    行("/* ---- 图 ----");
+    行("   像素是 RGBA8、行紧凑、左上原点。结构和字符串一样是轻量句柄：");
+    行("   赋值不会复制像素，两个变量指向同一张图。需要独立副本就用 图.缩放。");
+    行("   真正干活的函数在 lib简言图.a 里（stb_image / stb_image_write / nanosvg），");
+    行("   这里只放声明——否则每编译一个 .jy 都要重编四十万行第三方代码。 */");
+    行("typedef struct { int64_t 宽, 高; unsigned char *像素; } 简图;");
+    行("extern unsigned char *简_图_载(const char *路径, long long *宽, long long *高, char *错);");
+    行("extern int 简_图_存(const char *路径, const unsigned char *像素, long long 宽, long long 高);");
+    行("extern unsigned char *简_图_新(long long 宽, long long 高);");
+    行("extern void 简_图_放(unsigned char *像素);");
+    行("extern unsigned char *简_图_缩(const unsigned char *源, long long 宽, long long 高,");
+    行("                                long long 新宽, long long 新高);");
+    行("extern long long 简_图_写(unsigned char *画布, long long 宽, long long 高,");
+    行("                          long long x, long long y, double 字号,");
+    行("                          const char *文字, long long 长, long long 颜色);");
+    行("extern double 简_图_量(const char *文字, long long 长, double 字号);");
+    行("static int64_t 简_图_取(简图 g, int64_t x, int64_t y) {");
+    行("    if (!g.像素 || x < 0 || y < 0 || x >= g.宽 || y >= g.高) return 0;");
+    行("    const unsigned char *p = g.像素 + ((size_t)y * (size_t)g.宽 + (size_t)x) * 4;");
+    行("    return ((int64_t)p[0] << 24) | ((int64_t)p[1] << 16) | ((int64_t)p[2] << 8) | (int64_t)p[3];");
+    行("}");
+    行("static void 简_图_设(简图 g, int64_t x, int64_t y, int64_t c) {");
+    行("    if (!g.像素 || x < 0 || y < 0 || x >= g.宽 || y >= g.高) return;");
+    行("    unsigned char *p = g.像素 + ((size_t)y * (size_t)g.宽 + (size_t)x) * 4;");
+    行("    p[0] = (unsigned char)((c >> 24) & 255);");
+    行("    p[1] = (unsigned char)((c >> 16) & 255);");
+    行("    p[2] = (unsigned char)((c >>  8) & 255);");
+    行("    p[3] = (unsigned char)( c        & 255);");
+    行("}");
+    行("");
+    行("/* 简言字符串是 (指针, 长度)，不保证 NUL 结尾——`切分`、`取` 出来的都是原串的切片。");
+    行("   文件系统只认 C 字符串，所以每条路径都要先拷一份补上 0。");
+    行("   不补的话，stb 会顺着缓冲区往下读，打开一个名字长得出乎意料的文件——");
+    行("   或者干脆 ENOENT，而源文件里看着完全正常。 */");
+    行("static char *简_路径(简字 s) {");
+    行("    char *p = (char *)malloc((size_t)s.n + 1);");
+    行("    if (!p) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
+    行("    if (s.n) memcpy(p, s.p, (size_t)s.n);");
+    行("    p[s.n] = 0;");
+    行("    return p;");
     行("}");
     行("");
 }
@@ -827,6 +878,13 @@ static void 写指令(中间函数 *f, 指令 *q)
 
     /* ---- 调用 ---- */
     case 指_调用: {
+        /* 下面按名字展开的都是"编译器自带的"函数。
+         * 但用户完全可以定义同名函数（`函数 开方(x: 浮点)` 是很自然的写法），
+         * 而语义层已经允许用户顶掉内置符号。后端必须跟着让路——
+         * 否则会出现最难查的一类 bug：源码里明明调的是自己的函数，
+         * 生成的 C 里却是 libm 的 sqrt，两个都对、行为不同。 */
+        int 用户函数 = (q->文 && 找函数(q->文, q->文长)) ? 1 : 0;
+
         int 内置 = 0;
         if (q->文 && q->文长 == 6 && memcmp(q->文, "打印", 6) == 0) 内置 = 1;
         else if (q->文 && q->文长 == 9 && memcmp(q->文, "打印行", 9) == 0) 内置 = 2;
@@ -861,6 +919,108 @@ static void 写指令(中间函数 *f, 指令 *q)
             fprintf(出, "    exit((int)");
             if (q->多量 > 0) 值名(q->多[0]); else fputs("0", 出);
             fprintf(出, ");\n");
+            return;
+        }
+
+        /* ---- 数学：直接发 libm 调用 ----
+         * 这一层只是"名字翻译"，没有自己的实现。好处是拿到的就是 libm 的
+         * 精度和速度，也包括它那些边界行为（sqrt(-1) = NaN、atan2(0,0) = 0）。 */
+        if (q->文 && !用户函数) {
+            static const struct { const char *名; const char *c; int 数; } 数学[] = {
+                { "开方",     "sqrt",    1 },
+                { "正弦",     "sin",     1 },
+                { "余弦",     "cos",     1 },
+                { "正切",     "tan",     1 },
+                { "反正弦",   "asin",    1 },
+                { "反余弦",   "acos",    1 },
+                { "反正切",   "atan2",   2 },
+                { "指数",     "exp",     1 },
+                { "对数",     "log",     1 },
+                { "对数10",   "log10",   1 },
+                { "幂",       "pow",     2 },
+                { "最小",     "fmin",    2 },
+                { "最大",     "fmax",    2 },
+                { "向下取整", "floor",   1 },
+                { "向上取整", "ceil",    1 },
+                { "绝对值",   "fabs",    1 },
+            };
+            for (int i = 0; i < (int)(sizeof(数学) / sizeof(数学[0])); i++) {
+                if (!名同(q->文, q->文长, 数学[i].名, (int)strlen(数学[i].名))) continue;
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "%s((double)", 数学[i].c);
+                for (int k = 0; k < 数学[i].数 && k < q->多量; k++) {
+                    if (k) fputs(", (double)", 出);
+                    值名(q->多[k]);
+                }
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(q->文, q->文长, "四舍五入", 12)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "(long long)llround((double)");
+                if (q->多量 > 0) 值名(q->多[0]); else fputs("0", 出);
+                fprintf(出, ");\n");
+                return;
+            }
+        }
+
+        /* ---- 图片：三个自由函数 ----
+         * 都是"一个语句块"：里面要开临时变量放宽高和错误信息。
+         * 失败信息必须拷到堆上再塞进 结果 —— 简_果造 只按位拷贝那个 简字 结构体，
+         * 指针还是指向栈上的 char 数组，函数一返回就失效了。 */
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "读图", 6) && q->多量 >= 1) {
+            fprintf(出, "    { long long _w = 0, _h = 0; char _e[256]; _e[0] = 0;\n");
+            fprintf(出, "      char *_path = 简_路径(");
+            值名(q->多[0]);
+            fprintf(出, ");\n");
+            fprintf(出, "      unsigned char *_p = 简_图_载(_path, &_w, &_h, _e);\n");
+            fprintf(出, "      free(_path);\n");
+            fprintf(出, "      if (_p) { 简图 _g; _g.宽 = _w; _g.高 = _h; _g.像素 = _p;\n");
+            fprintf(出, "        ");
+            值名(果);
+            fprintf(出, " = 简_果造(1, &_g, (int)sizeof(_g)); }\n");
+            fprintf(出, "      else { size_t _n = strlen(_e); char *_d = (char *)malloc(_n + 1);\n");
+            fprintf(出, "        memcpy(_d, _e, _n + 1); 简字 _m = 简_字(_d, (int64_t)_n);\n");
+            fprintf(出, "        ");
+            值名(果);
+            fprintf(出, " = 简_果造(0, &_m, (int)sizeof(_m)); } }\n");
+            return;
+        }
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "存图", 6) && q->多量 >= 2) {
+            fprintf(出, "    { char *_path = 简_路径(");
+            值名(q->多[1]);
+            fprintf(出, ");\n");
+            fprintf(出, "      int _ok = 简_图_存(_path, ");
+            值名(q->多[0]);
+            fprintf(出, ".像素, ");
+            值名(q->多[0]);
+            fprintf(出, ".宽, ");
+            值名(q->多[0]);
+            fprintf(出, ".高);\n");
+            fprintf(出, "      free(_path);\n");
+            fprintf(出, "      if (_ok)  ");
+            值名(果);
+            fprintf(出, " = 简_果造(1, 0, 0);\n");
+            fprintf(出, "      else { static const char _msg[] = ");
+            fprintf(出, "\"存不进去：检查扩展名（png/jpg/bmp/tga）和目录权限\";\n");
+            fprintf(出, "        简字 _m = 简_字(_msg, (int64_t)strlen(_msg));\n");
+            fprintf(出, "        ");
+            值名(果);
+            fprintf(出, " = 简_果造(0, &_m, (int)sizeof(_m)); } }\n");
+            return;
+        }
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "新建图", 9) && q->多量 >= 2) {
+            fprintf(出, "    { 简图 _g; _g.宽 = (int64_t)");
+            值名(q->多[0]);
+            fprintf(出, "; _g.高 = (int64_t)");
+            值名(q->多[1]);
+            fprintf(出, "; _g.像素 = 简_图_新(_g.宽, _g.高);\n");
+            fprintf(出, "      if (!_g.像素) { fputs(\"新建图：宽高要大于 0，内存也可能不够\\n\", stderr); exit(7); }\n");
+            fprintf(出, "      ");
+            值名(果);
+            fprintf(出, " = _g; }\n");
             return;
         }
 
@@ -948,14 +1108,28 @@ static void 写指令(中间函数 *f, 指令 *q)
             }
             if (名同(m, ml, "取值", 6) || 名同(m, ml, "错误值", 9)) {
                 const char *ct = C型(q->型);
-                fprintf(出, "    { %s _r; memset(&_r, 0, sizeof(_r)); "
-                            "memcpy(&_r, ", ct);
+                /* 载荷固定 128 字节，而目标类型可能比它大（大结构体当结果值）。
+                 * 按 min(载荷宽, 目标宽) 拷，剩下的保持 memset 的零。 */
+                fprintf(出, "    { %s _r; memset(&_r, 0, sizeof(_r)); size_t _k = (size_t)(", ct);
                 值名(q->甲);
-                fprintf(出, ".p, sizeof(_r)); ");
+                fprintf(出, ".宽 < (int)sizeof(_r) ? ");
+                值名(q->甲);
+                fprintf(出, ".宽 : (int)sizeof(_r)); memcpy(&_r, ");
+                值名(q->甲);
+                fprintf(出, ".p, _k); ");
                 值名(果);
                 fprintf(出, " = _r; }\n");
                 return;
             }
+        }
+
+        if (ot && ot->种 == 型_图 && (名同(m, ml, "宽", 3) || 名同(m, ml, "高", 3))) {
+            fprintf(出, "    ");
+            值名(果);
+            fprintf(出, " = ");
+            值名(q->甲);
+            fprintf(出, ".%s;\n", 名同(m, ml, "宽", 3) ? "宽" : "高");
+            return;
         }
 
         if (ot && ot->种 == 型_可空) {
@@ -1146,10 +1320,15 @@ static void 写指令(中间函数 *f, 指令 *q)
             }
             if (名同(m, ml, "取值", 6) || 名同(m, ml, "错误值", 9)) {
                 const char *ct = C型(q->型);
-                fprintf(出, "    { %s _r; memset(&_r, 0, sizeof(_r)); "
-                            "memcpy(&_r, ", ct);
+                /* 载荷固定 128 字节，而目标类型可能比它大（大结构体当结果值）。
+                 * 按 min(载荷宽, 目标宽) 拷，剩下的保持 memset 的零。 */
+                fprintf(出, "    { %s _r; memset(&_r, 0, sizeof(_r)); size_t _k = (size_t)(", ct);
                 值名(q->甲);
-                fprintf(出, ".p, sizeof(_r)); ");
+                fprintf(出, ".宽 < (int)sizeof(_r) ? ");
+                值名(q->甲);
+                fprintf(出, ".宽 : (int)sizeof(_r)); memcpy(&_r, ");
+                值名(q->甲);
+                fprintf(出, ".p, _k); ");
                 值名(果);
                 fprintf(出, " = _r; }\n");
                 return;
@@ -1257,6 +1436,123 @@ static void 写指令(中间函数 *f, 指令 *q)
                 if (果 >= 0) { fprintf(出, "    "); 值名(果); fprintf(出, " = 0;\n"); }
                 return;
             }
+        }
+
+        if (ot && ot->种 == 型_图) {
+            if (名同(m, ml, "取", 3)) {
+                fprintf(出, "    ");
+                值名(果);
+                fprintf(出, " = 简_图_取(");
+                值名(q->甲);
+                fprintf(出, ", ");
+                值名(q->多[0]);
+                fprintf(出, ", ");
+                值名(q->多[1]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "设", 3)) {
+                fprintf(出, "    简_图_设(");
+                值名(q->甲);
+                fprintf(出, ", ");
+                值名(q->多[0]);
+                fprintf(出, ", ");
+                值名(q->多[1]);
+                fprintf(出, ", ");
+                值名(q->多[2]);
+                fprintf(出, ");\n");
+                if (果 >= 0) { fprintf(出, "    "); 值名(果); fprintf(出, " = 0;\n"); }
+                return;
+            }
+            if (名同(m, ml, "存", 3)) {
+                fprintf(出, "    { char *_path = 简_路径(");
+                值名(q->多[0]);
+                fprintf(出, ");\n");
+                fprintf(出, "      int _ok = 简_图_存(_path, ");
+                值名(q->甲);
+                fprintf(出, ".像素, ");
+                值名(q->甲);
+                fprintf(出, ".宽, ");
+                值名(q->甲);
+                fprintf(出, ".高);\n");
+                fprintf(出, "      free(_path);\n");
+                fprintf(出, "      if (_ok)  ");
+                值名(果);
+                fprintf(出, " = 简_果造(1, 0, 0);\n");
+                fprintf(出, "      else { static const char _msg[] = ");
+                fprintf(出, "\"存不进去：检查扩展名（png/jpg/bmp/tga）和目录权限\";\n");
+                fprintf(出, "        简字 _m = 简_字(_msg, (int64_t)strlen(_msg));\n");
+                fprintf(出, "        ");
+                值名(果);
+                fprintf(出, " = 简_果造(0, &_m, (int)sizeof(_m)); } }\n");
+                return;
+            }
+            if (名同(m, ml, "写字", 6)) {
+                /* 四个参数里前三个是数，第四个是 (指针, 长度) 的字符串。
+                 * 直接把 .p 和 .n 拆开传给 C——不要转成临时 NUL 串，
+                 * stb 这边收长度，本来就不需要结尾 0。 */
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "(long long)简_图_写(");
+                值名(q->甲);
+                fprintf(出, ".像素, ");
+                值名(q->甲);
+                fprintf(出, ".宽, ");
+                值名(q->甲);
+                fprintf(出, ".高, (long long)");
+                值名(q->多[0]);
+                fprintf(出, ", (long long)");
+                值名(q->多[1]);
+                fprintf(出, ", (double)");
+                值名(q->多[2]);
+                fprintf(出, ", ");
+                值名(q->多[3]);
+                fprintf(出, ".p, ");
+                值名(q->多[3]);
+                fprintf(出, ".n, (long long)");
+                值名(q->多[4]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "量字", 6)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "简_图_量(");
+                值名(q->多[0]);
+                fprintf(出, ".p, ");
+                值名(q->多[0]);
+                fprintf(出, ".n, (double)");
+                值名(q->多[1]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "缩放", 6)) {
+                /* 缩放是唯一会真的复制像素的操作。
+                 * 赋值、传参都只搬那个 24 字节的句柄，这是"图是共享的"最省事的边界。 */
+                fprintf(出, "    { 简图 _g = ");
+                值名(q->甲);
+                fprintf(出, ";\n");
+                fprintf(出, "      unsigned char *_p = 简_图_缩(_g.像素, _g.宽, _g.高, ");
+                值名(q->多[0]);
+                fprintf(出, ", ");
+                值名(q->多[1]);
+                fprintf(出, ");\n");
+                fprintf(出, "      if (!_p) { fputs(\"缩放：新宽高要大于 0，内存也可能不够\\n\", stderr); exit(7); }\n");
+                fprintf(出, "      ");
+                值名(果);
+                fprintf(出, ".宽 = ");
+                值名(q->多[0]);
+                fprintf(出, "; ");
+                值名(果);
+                fprintf(出, ".高 = ");
+                值名(q->多[1]);
+                fprintf(出, "; ");
+                值名(果);
+                fprintf(出, ".像素 = _p; }\n");
+                return;
+            }
+            fprintf(stderr, "后端还没实现图的方法：%.*s\n", ml, m);
+            exit(4);
         }
 
         if (是串) {
@@ -1932,6 +2228,39 @@ static void 生成C(节点 *根)
 
 /* ---------------------------------------------------------------- 主 -- */
 
+/* 找 lib简言图.a。
+ *
+ * 这个库是 stb_image / stb_image_write / nanosvg 编出来的静态库，
+ * 里面四十多万行第三方代码。生成的 C 只引用它、不含它。
+ *
+ * 找的顺序：先看 简编译 自己所在的目录（../第三方/ 和同目录），
+ * 再看当前工作目录。都没有就退化成"不链"——纯计算程序照样能编，
+ * 用到 图 的时候才会在链接阶段报 undefined reference，那时提示里有解法。 */
+static const char *找图库(void)
+{
+    static char 试[1200];
+    char 自身[1000];
+    ssize_t n = readlink("/proc/self/exe", 自身, sizeof(自身) - 1);
+    if (n > 0) {
+        自身[n] = 0;
+        char *斜 = strrchr(自身, '/');
+        if (斜) {
+            *斜 = 0;
+            const char *候选[] = { "%s/../第三方/lib简言图.a", "%s/lib简言图.a",
+                                   "%s/第三方/lib简言图.a" };
+            for (int i = 0; i < 3; i++) {
+                snprintf(试, sizeof(试), 候选[i], 自身);
+                FILE *f = fopen(试, "rb");
+                if (f) { fclose(f); return 试; }
+            }
+        }
+    }
+    const char *相对 = "第三方/lib简言图.a";
+    FILE *f = fopen(相对, "rb");
+    if (f) { fclose(f); return 相对; }
+    return NULL;
+}
+
 static void 用法(void)
 {
     fputs(
@@ -2006,15 +2335,25 @@ int main(int argc, char **argv)
     fclose(出);
 
     /* ---- 交给 gcc ---- */
-    char 命令[1024];
-    snprintf(命令, sizeof(命令),
-             "gcc -O2 -w -o '%s' '%s' -lm 2>&1", 输出, 临时路径);
+    /* 图片库排在源文件后面：静态链接按顺序取符号，放前面会一个都不拉。 */
+    char 命令[2048];
+    const char *图库 = 找图库();
+    if (图库)
+        snprintf(命令, sizeof(命令),
+                 "gcc -O2 -w -o '%s' '%s' '%s' -lm 2>&1", 输出, 临时路径, 图库);
+    else
+        snprintf(命令, sizeof(命令),
+                 "gcc -O2 -w -o '%s' '%s' -lm 2>&1", 输出, 临时路径);
+
     int rc = system(命令);
     remove(临时路径);
     if (rc != 0) {
         fprintf(stderr, "gcc 编译失败。想看得细一点：\n"
-                        "  简编译 %s -c /tmp/x.c && gcc -O2 -o %s /tmp/x.c -lm\n",
-                路径, 输出);
+                        "  简编译 %s -c /tmp/x.c && gcc -O2 -o %s /tmp/x.c %s -lm\n",
+                路径, 输出, 图库 ? 图库 : "");
+        if (!图库)
+            fprintf(stderr, "\n提示：用到 `图` 的话需要图形运行时库，"
+                            "在 简言/第三方 目录下跑 `make` 生成它。\n");
         return 1;
     }
 

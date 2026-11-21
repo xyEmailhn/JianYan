@@ -14,9 +14,9 @@ ZIG = $(shell command -v zig 2>/dev/null || ls /usr/local/lib/python3*/dist-pack
 快 = -O3 -flto -fno-plt -fno-asynchronous-unwind-tables -fno-unwind-tables \
      -fno-ident -ffunction-sections -Wl,--gc-sections
 
-.PHONY: all 最小 测试 示例 出图 干净
+.PHONY: all 最小 测试 示例 出图 图库 干净
 
-all: 简编译
+all: 简编译 图库
 
 简编译: 简编译.c ../中间/ir.c ../语义/sema.c ../语法/parser.c ../词法/lexer.c
 	$(CC) $(快) -s -o $@ 简编译.c -lm
@@ -39,5 +39,9 @@ all: 简编译
 出图: 简编译
 	@bash 出图.sh
 
+图库:
+	@$(MAKE) -C ../第三方
+
 干净:
 	rm -f 简编译 简编译_最小 简编译_静态
+	@$(MAKE) -C ../第三方 干净

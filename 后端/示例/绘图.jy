@@ -117,7 +117,7 @@
 
     -- ---------------- 渐变 ----------------
     打印行("<defs>")
-    打印行("<linearGradient id=\"天\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">")
+    打印行("<linearGradient id=\"天\" x1=\"0%\" y1=\"0%\" x2=\"0%\" y2=\"100%\">")
     打印行("<stop offset=\"0\" stop-color=\"#070a18\"/>")
     打印行("<stop offset=\"0.38\" stop-color=\"#171331\"/>")
     打印行("<stop offset=\"0.66\" stop-color=\"#3d1e3c\"/>")
@@ -125,25 +125,25 @@
     打印行("<stop offset=\"1\" stop-color=\"#cf6b3c\"/>")
     打印行("</linearGradient>")
 
-    打印行("<linearGradient id=\"海\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">")
+    打印行("<linearGradient id=\"海\" x1=\"0%\" y1=\"0%\" x2=\"0%\" y2=\"100%\">")
     打印行("<stop offset=\"0\" stop-color=\"#3a2233\"/>")
     打印行("<stop offset=\"0.30\" stop-color=\"#1b1226\"/>")
     打印行("<stop offset=\"1\" stop-color=\"#06040a\"/>")
     打印行("</linearGradient>")
 
-    打印行("<radialGradient id=\"日\" cx=\"0.5\" cy=\"0.5\" r=\"0.5\">")
+    打印行("<radialGradient id=\"日\" cx=\"50%\" cy=\"50%\" r=\"50%\">")
     打印行("<stop offset=\"0\" stop-color=\"#fffaea\"/>")
     打印行("<stop offset=\"0.50\" stop-color=\"#ffd68c\"/>")
     打印行("<stop offset=\"1\" stop-color=\"#ff8a3d\" stop-opacity=\"0\"/>")
     打印行("</radialGradient>")
 
-    打印行("<radialGradient id=\"晕\" cx=\"0.5\" cy=\"0.5\" r=\"0.5\">")
+    打印行("<radialGradient id=\"晕\" cx=\"50%\" cy=\"50%\" r=\"50%\">")
     打印行("<stop offset=\"0\" stop-color=\"#ffb066\" stop-opacity=\"0.40\"/>")
     打印行("<stop offset=\"0.42\" stop-color=\"#e2663f\" stop-opacity=\"0.12\"/>")
     打印行("<stop offset=\"1\" stop-color=\"#e2663f\" stop-opacity=\"0\"/>")
     打印行("</radialGradient>")
 
-    打印行("<linearGradient id=\"暖雾\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">")
+    打印行("<linearGradient id=\"暖雾\" x1=\"0%\" y1=\"0%\" x2=\"0%\" y2=\"100%\">")
     打印行("<stop offset=\"0\" stop-color=\"#ff9a5a\" stop-opacity=\"0\"/>")
     打印行("<stop offset=\"0.55\" stop-color=\"#ff9a5a\" stop-opacity=\"0.14\"/>")
     打印行("<stop offset=\"1\" stop-color=\"#ff9a5a\" stop-opacity=\"0\"/>")
@@ -151,20 +151,20 @@
 
     -- 倒影的底：一条很淡的竖直辉光，边是软的。
     -- 只有碎光没有底，光带会显得"干"；只有底没有碎光，又像一块抹布。
-    打印行("<linearGradient id=\"山影\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">")
+    打印行("<linearGradient id=\"山影\" x1=\"0%\" y1=\"0%\" x2=\"0%\" y2=\"100%\">")
     打印行("<stop offset=\"0\" stop-color=\"#0a0614\" stop-opacity=\"0.60\"/>")
     打印行("<stop offset=\"0.35\" stop-color=\"#0a0614\" stop-opacity=\"0.26\"/>")
     打印行("<stop offset=\"0.72\" stop-color=\"#0a0614\" stop-opacity=\"0.07\"/>")
     打印行("<stop offset=\"1\" stop-color=\"#0a0614\" stop-opacity=\"0\"/>")
     打印行("</linearGradient>")
 
-    打印行("<radialGradient id=\"倒影底\" cx=\"0.5\" cy=\"0.5\" r=\"0.5\">")
+    打印行("<radialGradient id=\"倒影底\" cx=\"50%\" cy=\"50%\" r=\"50%\">")
     打印行("<stop offset=\"0\" stop-color=\"#ffbb78\" stop-opacity=\"0.20\"/>")
     打印行("<stop offset=\"0.45\" stop-color=\"#ff9a52\" stop-opacity=\"0.075\"/>")
     打印行("<stop offset=\"1\" stop-color=\"#ff8a3d\" stop-opacity=\"0\"/>")
     打印行("</radialGradient>")
 
-    打印行("<radialGradient id=\"暗角\" cx=\"0.5\" cy=\"0.46\" r=\"0.72\">")
+    打印行("<radialGradient id=\"暗角\" cx=\"50%\" cy=\"46%\" r=\"72%\">")
     打印行("<stop offset=\"0.55\" stop-color=\"#000000\" stop-opacity=\"0\"/>")
     打印行("<stop offset=\"1\" stop-color=\"#000000\" stop-opacity=\"0.42\"/>")
     打印行("</radialGradient>")
