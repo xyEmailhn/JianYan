@@ -19,6 +19,8 @@
 #   绘图.png        1200×750   上面那张的位图版，用来嵌网页
 #   动画.gif        560×350    3 秒转台，60 帧
 #   动画.mp4        960×600    H.264
+#   主题.wav        8 秒       五声音阶循环，逐帧合成
+#   声纹.png        1600×600   47 秒人声的波形
 
 set -e
 cd "$(dirname "$0")"
@@ -70,6 +72,20 @@ ffmpeg -y -loglevel error -framerate 20 -i "$TMP/f%03d.ppm" \
 
 ffmpeg -y -loglevel error -framerate 20 -i "$TMP/f%03d.ppm" \
     -vf "scale=960:-1:flags=lanczos" -c:v libopenh264 -b:v 2M -pix_fmt yuv420p 出图/动画.mp4
+
+echo "⑥ 合成一段声音（正弦 + 包络 + 回声）"
+./简编译 示例/声音.jy -o "$TMP/声音"
+"$TMP/声音"
+
+# 声纹要读 出图/大肥鱼.mp3。这个文件是语音合成的产物，
+# 不进仓库也没有关系——没有它就跳过，不报错。
+if [ -f 出图/大肥鱼.mp3 ]; then
+    echo "⑦ 声纹（读 MP3 → 逐列 min/max → PNG）"
+    ./简编译 示例/声画.jy -o "$TMP/声画"
+    "$TMP/声画"
+else
+    echo "⑦ 跳过：没有 出图/大肥鱼.mp3"
+fi
 
 echo
 ls -lh 出图/
