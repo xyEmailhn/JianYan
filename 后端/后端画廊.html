@@ -937,7 +937,7 @@ $ bash 教程/跑.sh
 教程例子：过 14，错 0
 
 $ python3 教程/生成书.py
-写到 教程/教程.html（123.6 KB）</pre>
+写到 教程/教程.html（124.6 KB）</pre>
   <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
     最后那一步把十六个 Markdown 拼成单文件网页：米色纸面、宋体正文、粘性目录，
     没有外部依赖，拷到哪儿都能读。
@@ -948,6 +948,80 @@ $ python3 教程/生成书.py
   <strong>写文档是最好的测试。</strong> 你不可能一边写"该方法返回 <code>T 组</code>"
   一边发现它其实返回 <code>T</code>——除非你真的把那段代码跑了一遍。
   这一轮改的六处，没有一处是读代码读出来的。
+</p>
+
+<h2>然后它把说明书上的空头支票兑了 <small>v0.14：九项"没接"接上八项</small></h2>
+<p>
+  教程第 15 章结尾列了九项"规范里写着、跑不起来"的东西，还配了绕开的土办法。
+  这一版把它们挨个接上——顺手发现三个<b>编译器一直算错却从不报错</b>的地方。
+</p>
+
+<div class="card" style="margin-top:18px">
+  <h3>接上的八项 <b>从"写得出来"到"跑得起来"</b></h3>
+  <table>
+    <tr><th>功能</th><th>以前</th><th>现在</th></tr>
+    <tr><td><code>匹配</code> 字面量 / 范围</td><td><code>例 0:</code> 被当变体名，生成 <code>.变体</code> 编不过</td><td><code>例 0:</code> <code>例 1~9:</code> <code>例 "红":</code> <code>例 _:</code> 都能用</td></tr>
+    <tr><td>遍历映射 / 字符串</td><td>把 <code>简映</code> 塞进 <code>简组</code>，类型都不对</td><td><code>对 k, v 在 表</code>、<code>对 c 在 "简言"</code> 都通了</td></tr>
+    <tr><td><code>整数8/16/32</code></td><td>位宽只是名字，<code>整数8(300)</code> 还是 300</td><td>真按补码截断，<code>整数8(300)</code> → 44</td></tr>
+    <tr><td><code>失败返回</code></td><td>不是关键字，被解析成变量声明</td><td><code>甲 失败返回</code> 一行把错误原样往上递</td></tr>
+    <tr><td>接口默认方法</td><td>链接时找不到 <code>类型$方法</code></td><td>实现方不写就用接口里那份</td></tr>
+    <tr><td>函数值</td><td>把变量名当全局函数调，链接失败</td><td>能存、能传、能返回</td></tr>
+    <tr><td><code>读入()</code></td><td>签名写的是返回 <code>空值</code></td><td>读一行，去换行，EOF 给空串</td></tr>
+    <tr><td><code>引入</code></td><td>语义错</td><td><code>引入 工具.数</code> → 同目录下 <code>工具/数.jy</code></td></tr>
+  </table>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>三个不吭声的 bug <b>编译通过、跑得动、算错了</b></h3>
+  <pre>① 通道被"载"了一份
+   发送 管, 1     →   v3 = v2; 简_发(&amp;v3, &amp;v4);
+   往副本里塞，原来的通道永远是空的——和 组.追加 是同一个坑。
+
+② 字符串遍历从来没跑通过
+   v8.g = v7;     →   把 简字 塞进 简组，gcc 直接拒绝
+   而且旧写法靠"元素等于空"收尾，结构体组根本没法跟空比较。
+
+③ 匿名函数静默抓外层变量
+   v5 = 基;       →   生成一个叫 基 的符号，恰好撞上别的局部量就静默算错
+   现在按层号判定：外层变量一定比匿名函数自己那一层浅，一比就拦下。</pre>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    <b>"没接"和"接错"是两件事，后者危险得多。</b>
+    报错的那几个五分钟就能修；这三个都是编译通过、跑得动、还给出了一个看着正常的结果。
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>现在能这么写 <b>匹配、函数值、失败返回凑在一起</b></h3>
+  <pre>函数 档(x: 浮点) -> 字符串 {
+    匹配 x {
+        例 0.0:      { 返回 "零" }
+        例 0.1~1.0:  { 返回 "中" }
+        例 _:        { 返回 "外" }
+    }
+}
+
+私有 函数(整数) -&gt; 整数 加倍 = 函数(x: 整数) -&gt; 整数 { 返回 x * 2 }
+
+函数 两层(甲: 整数, 乙: 整数) -> 结果[整数, 字符串] {
+    私有 结果[整数, 字符串] r = 除(甲, 乙)
+    r 失败返回
+    返回 成功(r.取值() + 100)
+}</pre>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>还没接的 <b>只有一件了，但它是三件</b></h3>
+  <pre>线程 { } 仍然是顺序执行。要真并发，至少得补：
+  ① IR 层把块抬成独立函数，算清楚它捕获了哪些通道（闭包的地基）
+  ② 后端 pthread_create + 装参数的跳板
+  ③ 通道加互斥量与条件变量：满了要阻塞，空了要等待
+
+第三样不做，前两样只会让程序<b>偶发</b>出错，比顺序执行更糟。</pre>
+</div>
+
+<p style="margin-top:22px">
+  测试从 20 个涨到 <strong>25 个</strong>，新增的五个正好钉住这一轮：
+  <code>匹配</code>、<code>遍历</code>、<code>内置</code>、<code>函数值</code>、<code>引入</code>。
 </p>
 
 </body>

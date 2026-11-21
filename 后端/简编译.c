@@ -75,6 +75,13 @@ static const char *C型(类型 *t)
     case 型_通道:   return "简道";
     case 型_空:     return "void";
     case 型_布尔:   return "long long";
+    case 型_整数: {
+        /* 位宽不是装饰：整数8 就是 8 位，装 300 进去会截成 44 */
+        if (t->位宽 == 8)  return "int8_t";
+        if (t->位宽 == 16) return "int16_t";
+        if (t->位宽 == 32) return "int32_t";
+        return "long long";
+    }
     case 型_可空:   return C型(t->元素);
     case 型_命名: {
         /* 名字不是 NUL 结尾，抄一份出来。两轮缓冲，够同时写两个类型了。 */
@@ -386,6 +393,20 @@ static void 写运行时(void)
     行("    return r;");
     行("}");
     行("static void 简_打印(简字 s) { if (s.n) fwrite(s.p, 1, (size_t)s.n, stdout); }");
+    /* 读一行，去掉行尾的 \n 与 \r。EOF 给空串——和 Go 的 ReadString 不同，
+     * 这里不把"读完了"和"读到空行"分开，需要区分请自己计长度。 */
+    行("static 简字 简_读入(void) {");
+    行("    char *p = NULL; int64_t n = 0, 容 = 0; int c;");
+    行("    while ((c = getchar()) != EOF) {");
+    行("        if (c == '\\n') break;");
+    行("        if (n + 1 >= 容) { 容 = 容 ? 容 * 2 : 128; p = (char *)realloc(p, (size_t)容); }");
+    行("        p[n++] = (char)c;");
+    行("    }");
+    行("    if (n > 0 && p[n - 1] == '\\r') n--;");
+    行("    if (!p) { p = (char *)malloc(1); }");
+    行("    p[n] = 0;");
+    行("    return 简_字(p, n);");
+    行("}");
     行("");
     行("/* ---- 组的增删查 ---- */");
     行("static void 简_留够(简组 *g, int64_t 需) {");
@@ -998,6 +1019,14 @@ static void 写指令(中间函数 *f, 指令 *q)
         if (q->文 && q->文长 == 6 && memcmp(q->文, "打印", 6) == 0) 内置 = 1;
         else if (q->文 && q->文长 == 9 && memcmp(q->文, "打印行", 9) == 0) 内置 = 2;
         else if (q->文 && q->文长 == 6 && memcmp(q->文, "退出", 6) == 0) 内置 = 3;
+        else if (q->文 && q->文长 == 6 && memcmp(q->文, "读入", 6) == 0) 内置 = 4;
+
+        if (内置 == 4) {
+            fprintf(出, "    ");
+            if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+            fprintf(出, "简_读入();\n");
+            return;
+        }
 
         if (内置 == 1 || 内置 == 2) {
             for (int i = 0; i < q->多量; i++) {
@@ -2790,6 +2819,70 @@ static void 用法(void)
         stderr);
 }
 
+/* ---- 引入：把被引入的文件读进来、解析出来，当成本文件的一部分 ----
+ * 这一版没有模块隔离：所有顶层名字进同一张表。
+ * 好处是零学习成本，坏处是两个文件同名就得改名——报错会直接说重名。 */
+static const char *已装文件[64];
+static int 已装数;
+
+static 节点 *解析一份(const char *路径)
+{
+    int 长 = 0;
+    char *源 = 读文件(路径, &长);
+    if (!源) return NULL;
+    int 词数 = 0, 词法错误 = 0;
+    词 *词们 = 切好所有词(源, 长, &词数, &词法错误);
+    语法器 P;
+    备好语法器(&P, 词们, 词数, 源, 长, 路径);
+    return 解析程序(&P);
+}
+
+static void 装引入(节点 *根, const char *本文件)
+{
+    int 原有 = 根->子数;
+    for (int i = 0; i < 原有; i++) {
+        节点 *n = 根->子[i];
+        if (n->种类 != 节_引入) continue;
+        if (n->子数 > 0) {
+            fprintf(stderr, "%s:%d: `引入 … 为 别名` 和 `引入 …{甲, 乙}` 这一版还没接，先写 `引入 路径.到.模块`\n",
+                    本文件, n->行);
+            exit(5);
+        }
+        char 文件[1024];
+        int 位 = 0;
+        for (int k = (int)strlen(本文件) - 1; k >= 0; k--)
+            if (本文件[k] == '/') { 位 = k + 1; break; }
+        if (位 + n->文字长 + 4 >= (int)sizeof(文件)) {
+            fprintf(stderr, "%s:%d: 引入路径太长\n", 本文件, n->行);
+            exit(5);
+        }
+        memcpy(文件, 本文件, (size_t)位);
+        for (int k = 0; k < n->文字长; k++)
+            文件[位 + k] = (n->文字[k] == '.') ? '/' : n->文字[k];
+        位 += n->文字长;
+        文件[位++] = '.'; 文件[位++] = 'j'; 文件[位++] = 'y'; 文件[位] = 0;
+
+        int 装过 = 0;
+        for (int k = 0; k < 已装数; k++)
+            if (strcmp(已装文件[k], 文件) == 0) 装过 = 1;
+        if (装过) continue;
+        if (已装数 < 64) 已装文件[已装数++] = strdup(文件);
+
+        节点 *子根 = 解析一份(文件);
+        if (!子根) {
+            fprintf(stderr, "%s:%d: 引入 `%.*s`，找不到文件 %s\n",
+                    本文件, n->行, n->文字长, n->文字, 文件);
+            exit(5);
+        }
+        装引入(子根, 文件);
+        for (int k = 0; k < 子根->子数; k++) {
+            节点 *c = 子根->子[k];
+            if (c->种类 == 节_模块) continue;   /* 一个程序只有一个模块名，以主文件为准 */
+            加子(根, c);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) { 用法(); return 2; }
@@ -2834,6 +2927,9 @@ int main(int argc, char **argv)
     语法器 P;
     备好语法器(&P, 词们, 词数, 源, 源长, 路径);
     节点 *根 = 解析程序(&P);
+
+    已装文件[已装数++] = strdup(路径);
+    装引入(根, 路径);
 
     if (!生成(根)) {
         fprintf(stderr, "语义检查没通过，不生成代码\n");

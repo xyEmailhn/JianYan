@@ -268,9 +268,9 @@ make                 # 编出编译器 ./简编译，约 12 秒
 </tbody>
 </table>
 <h2>这一版没接的东西</h2>
-<p>教程只讲<strong>真的能跑</strong>的东西。规范里还有几项这一版没接，遇到会明确报错，
-不会悄悄算错：模块 <code>引入</code>、<code>线程</code>/<code>通道</code>、<code>匹配</code> 的字面量与范围分支、
-接口默认方法、<code>失败返回</code>、函数值调用。第 <a href="15-报错速查.md">15</a> 章有完整清单。</p></section>
+<p>教程只讲<strong>真的能跑</strong>的东西。v0.14 之后剩下的是这几样：<code>线程 { }</code> 仍按顺序执行
+（通道本身能用）、匿名函数没有闭包、<code>引入</code> 不支持别名和选择性引入、<code>匹配</code> 不能当表达式。
+遇到会明确报错，不会悄悄算错。第 <a href="15-报错速查.md">15</a> 章有完整清单。</p></section>
 <section id="ch01" class=""><h1>00 · 开始</h1>
 <blockquote>
 <p>十分钟内让你看到第一行输出。顺便把仓库里每个目录是干什么的说清楚。</p>
@@ -3778,61 +3778,93 @@ v = 算...（v 只被 存 用一次）  → 让算式直接写进变量槽
 </tr>
 </tbody>
 </table>
-<h2>15.7 这一版明确没接的功能</h2>
-<p>写在规范里、但这一版跑不起来的东西，遇到别怀疑自己：</p>
+<h2>15.7 这一版能用到什么程度</h2>
+<p>下面这些以前是"写得出来、跑不起来"，v0.14 全接上了：</p>
 <table>
 <thead>
 <tr>
 <th>功能</th>
-<th>现象</th>
-<th>替代做法</th>
+<th>怎么写</th>
+<th>说明</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>引入 模块</code></td>
-<td>语义错或不认</td>
-<td>所有代码写一个文件里</td>
-</tr>
-<tr>
-<td><code>线程</code> / <code>通道</code></td>
-<td><code>线程</code> 块被内联成顺序执行</td>
-<td>先写单线程</td>
-</tr>
-<tr>
-<td><code>匹配</code> 的字面量/范围分支</td>
-<td>生成 C 时出现 <code>.变体</code> 错误</td>
-<td>用 <code>如果 ... 否则如果</code></td>
+<td><code>匹配</code> 字面量 / 范围</td>
+<td><code>例 0:</code>、<code>例 1~9:</code>、<code>例 "红":</code>、<code>例 _:</code></td>
+<td>非枚举的对象必须写 <code>默认</code> 或 <code>例 _</code></td>
 </tr>
 <tr>
 <td>接口默认方法</td>
-<td>链接时找不到 <code>类型$方法</code></td>
-<td>每个方法都手写实现</td>
+<td>接口里直接写函数体</td>
+<td>实现方不写，就用接口里那份</td>
 </tr>
 <tr>
 <td><code>失败返回</code></td>
-<td><code>找不到 失败返回</code></td>
-<td>显式判 <code>是失败</code> 再 <code>返回 失败(...)</code></td>
+<td><code>甲 失败返回</code></td>
+<td>等价于 <code>如果 甲.是失败 就 { 返回 失败(甲.错误值) }</code></td>
 </tr>
 <tr>
-<td>函数值调用</td>
-<td><code>undefined reference</code></td>
-<td>直接调用具名函数</td>
+<td>函数值</td>
+<td><code>函数(整数) -&gt; 整数 f = 函数(x: 整数) { ... }</code></td>
+<td>能存、能传、能返回；<strong>没有闭包</strong></td>
 </tr>
 <tr>
 <td><code>读入()</code></td>
-<td>返回类型是 <code>空值</code></td>
-<td>这一版从命令行参数或文件读</td>
+<td><code>私有 字符串 行 = 读入()</code></td>
+<td>读一行，去掉行尾换行；EOF 给空串</td>
 </tr>
 <tr>
-<td><code>整数8/16/32</code> 的转换</td>
-<td><code>找不到 整数32</code></td>
-<td>一律用 <code>整数</code>（64 位）</td>
+<td><code>整数8/16/32</code></td>
+<td><code>整数8(300)</code> → <code>44</code></td>
+<td>真的按补码截断，不是摆设</td>
 </tr>
 <tr>
 <td><code>对 k, v 在 映射</code></td>
-<td>第二个变量没绑定</td>
-<td><code>对 k 在 m.键组() { m.取(k) }</code></td>
+<td>一次拿键和值</td>
+<td>顺序由 <code>键组()</code> 定，和哈希布局无关</td>
+</tr>
+<tr>
+<td><code>引入</code></td>
+<td><code>引入 工具.数</code> → 同目录下 <code>工具/数.jy</code></td>
+<td>名字进同一张表，没有模块隔离</td>
+</tr>
+</tbody>
+</table>
+<p>还在路上、遇到别怀疑自己：</p>
+<table>
+<thead>
+<tr>
+<th>功能</th>
+<th>现在是什么样</th>
+<th>绕开</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>线程 { }</code> 真并发</td>
+<td>块是顺序执行的，不会开新线程</td>
+<td>通道本身能用，先写单线程</td>
+</tr>
+<tr>
+<td>闭包</td>
+<td>匿名函数抓不到外层局部变量，会明确报错</td>
+<td>把它变成形参传进来</td>
+</tr>
+<tr>
+<td><code>引入 … 为 别名</code> / <code>引入 …{甲, 乙}</code></td>
+<td>报"这一版还没接"</td>
+<td>用整模块引入，名字直接写</td>
+</tr>
+<tr>
+<td><code>匹配</code> 当表达式</td>
+<td><code>私有 整数 x = 匹配 ...</code> 不认，<code>匹配</code> 是语句</td>
+<td>先赋值再看，或者写函数</td>
+</tr>
+<tr>
+<td>接口默认方法里用字段</td>
+<td>默认方法只能用接口自己的方法</td>
+<td>需要字段就在实现里重写一遍</td>
 </tr>
 </tbody>
 </table>
