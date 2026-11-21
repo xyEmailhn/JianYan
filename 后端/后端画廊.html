@@ -835,11 +835,12 @@ $ 简编译 程序.jy -S 程序.s
   <h3>实测 <b>同一批程序，三种产物</b></h3>
   <table>
     <tr><th>用例</th><th>gcc -O2</th><th>栈机</th><th>寄存器</th><th>栈机→寄存器</th><th>与 gcc</th></tr>
-    <tr><td>热循环 3 千万次</td><td>54ms</td><td>178ms</td><td><b>68ms</b></td><td>2.61×</td><td>1.23×</td></tr>
-    <tr><td>混合 5 千万次（乘加掩码链）</td><td>68ms</td><td>177ms</td><td><b>68ms</b></td><td>2.60×</td><td>1.00×</td></tr>
-    <tr><td>整除 3 千万次（<code>%7</code> / <code>//3</code>）</td><td>31ms</td><td>126ms</td><td><b>46ms</b></td><td>2.73×</td><td>1.48×</td></tr>
-    <tr><td>调用 5 千万次</td><td>81ms</td><td>225ms</td><td><b>78ms</b></td><td>2.88×</td><td><b>0.92×</b></td></tr>
-    <tr><td>斐波那契 fib(35)（2400 万次递归）</td><td>12ms</td><td>85ms</td><td><b>45ms</b></td><td>1.88×</td><td>3.75×</td></tr>
+    <tr><td>热循环 3 千万次</td><td>54ms</td><td>177ms</td><td><b>68ms</b></td><td>2.60×</td><td>1.25×</td></tr>
+    <tr><td>混合 5 千万次（乘加掩码链）</td><td>68ms</td><td>176ms</td><td><b>68ms</b></td><td>2.58×</td><td>1.00×</td></tr>
+    <tr><td>整除 3 千万次（<code>%7</code> / <code>//3</code>）</td><td>31ms</td><td>123ms</td><td><b>46ms</b></td><td>2.67×</td><td>1.48×</td></tr>
+    <tr><td>调用 5 千万次</td><td>81ms</td><td>224ms</td><td><b>75ms</b></td><td>2.98×</td><td><b>0.92×</b></td></tr>
+    <tr><td>素数 40 万（两层循环 + idiv）</td><td>37ms</td><td>76ms</td><td><b>37ms</b></td><td>2.05×</td><td>1.00×</td></tr>
+    <tr><td>斐波那契 fib(35)（2400 万次递归）</td><td>11ms</td><td>88ms</td><td><b>45ms</b></td><td>1.95×</td><td>3.75×</td></tr>
   </table>
   <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
     调用那一项<b>反超</b> gcc：gcc 把小函数全内联进去，代码膨胀反而拖慢了指令缓存。
