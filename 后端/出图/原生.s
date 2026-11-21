@@ -1,6 +1,6 @@
 /* ============================================================
  *  这份汇编由 简言 原生后端直接生成，不经过 C，也不经过 gcc。
- *  流程：.jy -> 词法 -> 语法 -> 语义 -> IR -> 这里 -> as -> ld
+ *  流程：.jy -> 词法 -> 语法 -> 语义 -> IR -> 寄存器分配 -> 这里 -> as -> ld
  * ============================================================ */
 
     .text
@@ -65,7 +65,6 @@
     movq $1, %rax
     testq %rsi, %rsi
     jle .Lpow_done
-    testq %rax, %rax
 .Lpow_loop:
     testq $1, %rsi
     jz .Lpow_skip
@@ -148,335 +147,182 @@
     .text
 
 
-/* ---- 简言函数：斐波那契（4 块 / 17 条指令）---- */
+/* ---- 简言函数：斐波那契（4 块 / 17 条指令 / 稳存 2）---- */
 汇F0:
     pushq %rbp
     movq %rsp, %rbp
-    subq $288, %rsp
-    movq %rdi, -16(%rbp)
+    pushq %rbx
+    pushq %r12
+    subq $240, %rsp
+    movq %rdi, -32(%rbp)
+    movq -32(%rbp), %rbx
 .L0_0:
-    movq -16(%rbp), %rax
-    movq %rax, -32(%rbp)
-    movq -8(%rbp), %rax
-    movq %rax, -24(%rbp)
-    movq $2, -48(%rbp)
-    movq $0, -40(%rbp)
-    movq -32(%rbp), %rax
-    movq -48(%rbp), %rcx
-    cmpq %rcx, %rax
-    setl %al
-    movzbq %al, %rax
-    movq %rax, -64(%rbp)
-    cmpq $0, -64(%rbp)
-    jne .L0_1
-    jmp .L0_2
+    cmpq $2, %rbx
+    jge .L0_2
 .L0_1:
-    movq -16(%rbp), %rax
-    movq %rax, -80(%rbp)
-    movq -8(%rbp), %rax
-    movq %rax, -72(%rbp)
-    movq -80(%rbp), %rax
-    movq -72(%rbp), %rdx
+    movq %rbx, %rax
+    movq -8(%rbp), %rbx
+    movq -16(%rbp), %r12
     leave
     ret
 .L0_2:
-    jmp .L0_3
 .L0_3:
-    movq -16(%rbp), %rax
-    movq %rax, -96(%rbp)
-    movq -8(%rbp), %rax
-    movq %rax, -88(%rbp)
-    movq $1, -112(%rbp)
-    movq $0, -104(%rbp)
-    movq -96(%rbp), %rax
-    subq -112(%rbp), %rax
-    movq %rax, -128(%rbp)
-    movq -128(%rbp), %rdi
+    leaq -1(%rbx), %rsi
+    movq %rsi, %rdi
     call 汇F0
-    movq %rax, -144(%rbp)
-    movq -16(%rbp), %rax
-    movq %rax, -160(%rbp)
-    movq -8(%rbp), %rax
-    movq %rax, -152(%rbp)
-    movq $2, -176(%rbp)
-    movq $0, -168(%rbp)
-    movq -160(%rbp), %rax
-    subq -176(%rbp), %rax
-    movq %rax, -192(%rbp)
-    movq -192(%rbp), %rdi
+    movq %rax, %r12
+    subq $2, %rbx
+    movq %rbx, %rdi
     call 汇F0
-    movq %rax, -208(%rbp)
-    movq -144(%rbp), %rax
-    addq -208(%rbp), %rax
-    movq %rax, -224(%rbp)
-    movq -224(%rbp), %rax
-    movq -216(%rbp), %rdx
+    movq %rax, %rbx
+    addq %rbx, %r12
+    movq %r12, %rax
+    movq -8(%rbp), %rbx
+    movq -16(%rbp), %r12
     leave
     ret
     xorl %eax, %eax
+    movq -8(%rbp), %rbx
+    movq -16(%rbp), %r12
     leave
     ret
 
-/* ---- 简言函数：求和（4 块 / 20 条指令）---- */
+/* ---- 简言函数：求和（4 块 / 20 条指令 / 稳存 1）---- */
 汇F1:
     pushq %rbp
     movq %rsp, %rbp
-    subq $304, %rsp
-    movq %rdi, -16(%rbp)
+    pushq %rbx
+    subq $256, %rsp
+    movq %rdi, -24(%rbp)
+    movq -24(%rbp), %rbx
 .L1_0:
-    movq $0, -32(%rbp)
-    movq $0, -24(%rbp)
-    movq -32(%rbp), %rax
-    movq %rax, -48(%rbp)
-    movq -24(%rbp), %rax
-    movq %rax, -40(%rbp)
-    movq $1, -64(%rbp)
-    movq $0, -56(%rbp)
-    movq -64(%rbp), %rax
-    movq %rax, -80(%rbp)
-    movq -56(%rbp), %rax
-    movq %rax, -72(%rbp)
-    jmp .L1_1
+    movq $0, %r10
+    movq $1, %rsi
 .L1_1:
-    movq -80(%rbp), %rax
-    movq %rax, -96(%rbp)
-    movq -72(%rbp), %rax
-    movq %rax, -88(%rbp)
-    movq -16(%rbp), %rax
-    movq %rax, -112(%rbp)
-    movq -8(%rbp), %rax
-    movq %rax, -104(%rbp)
-    movq -96(%rbp), %rax
-    movq -112(%rbp), %rcx
-    cmpq %rcx, %rax
-    setle %al
-    movzbq %al, %rax
-    movq %rax, -128(%rbp)
-    cmpq $0, -128(%rbp)
-    jne .L1_2
-    jmp .L1_3
+    cmpq %rbx, %rsi
+    jg .L1_3
 .L1_2:
-    movq -48(%rbp), %rax
-    movq %rax, -144(%rbp)
-    movq -40(%rbp), %rax
-    movq %rax, -136(%rbp)
-    movq -80(%rbp), %rax
-    movq %rax, -160(%rbp)
-    movq -72(%rbp), %rax
-    movq %rax, -152(%rbp)
-    movq -144(%rbp), %rax
-    addq -160(%rbp), %rax
-    movq %rax, -176(%rbp)
-    movq -176(%rbp), %rax
-    movq %rax, -48(%rbp)
-    movq -168(%rbp), %rax
-    movq %rax, -40(%rbp)
-    movq -80(%rbp), %rax
-    movq %rax, -192(%rbp)
-    movq -72(%rbp), %rax
-    movq %rax, -184(%rbp)
-    movq $1, -208(%rbp)
-    movq $0, -200(%rbp)
-    movq -192(%rbp), %rax
-    addq -208(%rbp), %rax
-    movq %rax, -224(%rbp)
-    movq -224(%rbp), %rax
-    movq %rax, -80(%rbp)
-    movq -216(%rbp), %rax
-    movq %rax, -72(%rbp)
+    addq %rsi, %r10
+    addq $1, %rsi
     jmp .L1_1
 .L1_3:
-    movq -48(%rbp), %rax
-    movq %rax, -240(%rbp)
-    movq -40(%rbp), %rax
-    movq %rax, -232(%rbp)
-    movq -240(%rbp), %rax
-    movq -232(%rbp), %rdx
+    movq %r10, %rax
+    movq -8(%rbp), %rbx
     leave
     ret
     xorl %eax, %eax
+    movq -8(%rbp), %rbx
     leave
     ret
 
-/* ---- 简言函数：主（4 块 / 52 条指令）---- */
+/* ---- 简言函数：主（4 块 / 52 条指令 / 稳存 3）---- */
 汇F2:
     pushq %rbp
     movq %rsp, %rbp
-    subq $816, %rsp
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    subq $784, %rsp
 .L2_0:
-    leaq .LSTR0(%rip), %rax
-    movq %rax, -16(%rbp)
-    movq $19, -8(%rbp)
-    movq -16(%rbp), %rdi
-    movq -8(%rbp), %rsi
+    leaq .LSTR0(%rip), %rsi
+    movq $19, -32(%rbp)
+    movq %rsi, %rdi
+    movq -32(%rbp), %rsi
     call 简_写
-    movq $0, -32(%rbp)
-    movq $20, -48(%rbp)
-    movq $0, -40(%rbp)
-    movq -48(%rbp), %rdi
+    movq $20, %rdi
     call 汇F0
-    movq %rax, -64(%rbp)
-    movq -64(%rbp), %rdi
+    movq %rax, %rsi
+    movq %rsi, %rdi
     call 简_打整
     call 简_换行
-    movq $0, -80(%rbp)
-    leaq .LSTR1(%rip), %rax
-    movq %rax, -96(%rbp)
-    movq $16, -88(%rbp)
-    movq -96(%rbp), %rdi
-    movq -88(%rbp), %rsi
+    leaq .LSTR1(%rip), %rsi
+    movq $16, -112(%rbp)
+    movq %rsi, %rdi
+    movq -112(%rbp), %rsi
     call 简_写
-    movq $0, -112(%rbp)
-    movq $100, -128(%rbp)
-    movq $0, -120(%rbp)
-    movq -128(%rbp), %rdi
+    movq $100, %rdi
     call 汇F1
-    movq %rax, -144(%rbp)
-    movq -144(%rbp), %rdi
+    movq %rax, %rsi
+    movq %rsi, %rdi
     call 简_打整
     call 简_换行
-    movq $0, -160(%rbp)
-    leaq .LSTR2(%rip), %rax
-    movq %rax, -176(%rbp)
-    movq $7, -168(%rbp)
-    movq -176(%rbp), %rdi
-    movq -168(%rbp), %rsi
+    leaq .LSTR2(%rip), %rsi
+    movq $7, -192(%rbp)
+    movq %rsi, %rdi
+    movq -192(%rbp), %rsi
     call 简_写
-    movq $0, -192(%rbp)
-    movq $1024, -208(%rbp)
-    movq $0, -200(%rbp)
-    movq -208(%rbp), %rdi
+    movq $1024, %rdi
     call 简_打整
     call 简_换行
-    movq $0, -224(%rbp)
-    leaq .LSTR3(%rip), %rax
-    movq %rax, -240(%rbp)
-    movq $10, -232(%rbp)
-    movq -240(%rbp), %rdi
-    movq -232(%rbp), %rsi
+    leaq .LSTR3(%rip), %rsi
+    movq $10, -256(%rbp)
+    movq %rsi, %rdi
+    movq -256(%rbp), %rsi
     call 简_写
-    movq $0, -256(%rbp)
-    movq $3, -272(%rbp)
-    movq $0, -264(%rbp)
-    movq -272(%rbp), %rdi
+    movq $3, %rdi
     call 简_打整
     call 简_换行
-    movq $0, -288(%rbp)
-    leaq .LSTR4(%rip), %rax
-    movq %rax, -304(%rbp)
-    movq $9, -296(%rbp)
-    movq -304(%rbp), %rdi
-    movq -296(%rbp), %rsi
+    leaq .LSTR4(%rip), %rsi
+    movq $9, -320(%rbp)
+    movq %rsi, %rdi
+    movq -320(%rbp), %rsi
     call 简_写
-    movq $0, -320(%rbp)
-    movq $2, -336(%rbp)
-    movq $0, -328(%rbp)
-    movq -336(%rbp), %rdi
+    movq $2, %rdi
     call 简_打整
     call 简_换行
-    movq $0, -352(%rbp)
-    leaq .LSTR5(%rip), %rax
-    movq %rax, -368(%rbp)
-    movq $24, -360(%rbp)
-    movq -368(%rbp), %rdi
-    movq -360(%rbp), %rsi
+    leaq .LSTR5(%rip), %rsi
+    movq $24, -384(%rbp)
+    movq %rsi, %rdi
+    movq -384(%rbp), %rsi
     call 简_写
-    movq $0, -384(%rbp)
-    movq $-3, -400(%rbp)
-    movq $0, -392(%rbp)
-    movq -400(%rbp), %rdi
+    movq $-3, %rdi
     call 简_打整
     call 简_换行
-    movq $0, -416(%rbp)
-    leaq .LSTR6(%rip), %rax
-    movq %rax, -432(%rbp)
-    movq $23, -424(%rbp)
-    movq -432(%rbp), %rdi
-    movq -424(%rbp), %rsi
+    leaq .LSTR6(%rip), %rsi
+    movq $23, -448(%rbp)
+    movq %rsi, %rdi
+    movq -448(%rbp), %rsi
     call 简_写
-    movq $0, -448(%rbp)
-    movq $-2, -464(%rbp)
-    movq $0, -456(%rbp)
-    movq -464(%rbp), %rdi
+    movq $-2, %rdi
     call 简_打整
     call 简_换行
-    movq $0, -480(%rbp)
-    leaq .LSTR7(%rip), %rax
-    movq %rax, -496(%rbp)
-    movq $9, -488(%rbp)
-    movq -496(%rbp), %rdi
-    movq -488(%rbp), %rsi
+    leaq .LSTR7(%rip), %rsi
+    movq $9, -512(%rbp)
+    movq %rsi, %rdi
+    movq -512(%rbp), %rsi
     call 简_写
-    movq $0, -512(%rbp)
-    leaq .LSTR8(%rip), %rax
-    movq %rax, -528(%rbp)
-    movq $7, -520(%rbp)
-    movq -528(%rbp), %rdi
-    movq -520(%rbp), %rsi
+    leaq .LSTR8(%rip), %rsi
+    movq $7, -544(%rbp)
+    movq %rsi, %rdi
+    movq -544(%rbp), %rsi
     call 简_写
     call 简_换行
-    movq $0, -544(%rbp)
-    movq $0, -560(%rbp)
-    movq $0, -552(%rbp)
-    movq -560(%rbp), %rax
-    movq %rax, -576(%rbp)
-    movq -552(%rbp), %rax
-    movq %rax, -568(%rbp)
-    jmp .L2_1
+    movq $0, %r13
 .L2_1:
-    movq -576(%rbp), %rax
-    movq %rax, -592(%rbp)
-    movq -568(%rbp), %rax
-    movq %rax, -584(%rbp)
-    movq $10, -608(%rbp)
-    movq $0, -600(%rbp)
-    movq -592(%rbp), %rax
-    movq -608(%rbp), %rcx
-    cmpq %rcx, %rax
-    setl %al
-    movzbq %al, %rax
-    movq %rax, -624(%rbp)
-    cmpq $0, -624(%rbp)
-    jne .L2_2
-    jmp .L2_3
+    cmpq $10, %r13
+    jge .L2_3
 .L2_2:
-    movq -576(%rbp), %rax
-    movq %rax, -640(%rbp)
-    movq -568(%rbp), %rax
-    movq %rax, -632(%rbp)
-    movq $3, -656(%rbp)
-    movq $0, -648(%rbp)
-    movq -640(%rbp), %rax
-    addq -656(%rbp), %rax
-    movq %rax, -672(%rbp)
-    movq -672(%rbp), %rax
-    movq %rax, -576(%rbp)
-    movq -664(%rbp), %rax
-    movq %rax, -568(%rbp)
+    addq $3, %r13
     jmp .L2_1
 .L2_3:
-    leaq .LSTR9(%rip), %rax
-    movq %rax, -688(%rbp)
-    movq $6, -680(%rbp)
-    movq -688(%rbp), %rdi
-    movq -680(%rbp), %rsi
+    leaq .LSTR9(%rip), %rbx
+    movq $6, -704(%rbp)
+    movq %rbx, %rdi
+    movq -704(%rbp), %rsi
     call 简_写
-    movq $0, -704(%rbp)
-    movq -576(%rbp), %rax
-    movq %rax, -720(%rbp)
-    movq -568(%rbp), %rax
-    movq %rax, -712(%rbp)
-    movq -720(%rbp), %rdi
+    movq %r13, %rdi
     call 简_打整
     call 简_换行
-    movq $0, -736(%rbp)
-    movq $0, -752(%rbp)
-    movq $0, -744(%rbp)
-    movq -752(%rbp), %rax
-    movq -744(%rbp), %rdx
+    movq $0, %rax
+    movq -8(%rbp), %rbx
+    movq -16(%rbp), %r12
+    movq -24(%rbp), %r13
     leave
     ret
     xorl %eax, %eax
+    movq -8(%rbp), %rbx
+    movq -16(%rbp), %r12
+    movq -24(%rbp), %r13
     leave
     ret
 

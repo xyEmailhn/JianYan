@@ -774,5 +774,104 @@ $ 简编译 程序.jy -S 程序.s
   </div>
 </div>
 
+
+<h2>然后它学会了用寄存器 <small>v0.12：活跃变量 + 线性扫描 + 指令选择</small></h2>
+<p>
+  上一版证明了「不经过 C 也能变成机器码」，但它很慢：每个值都住在栈上，
+  算一条加法要 <code>载－算－存</code> 三步。这一版把值搬进寄存器，
+  顺便把 <code>载/存</code> 那两条白搬的 mov 直接删掉。
+</p>
+<p>
+  同一个热循环，左边是栈机版的一小段，右边是寄存器版的全貌。
+  <strong>11 条变 4 条，而且这 4 条里没有一条在访问内存。</strong>
+</p>
+
+<div class="cols" style="margin-top:18px">
+  <div class="card">
+    <h3>栈机版 <b>一条加法三次访存</b></h3>
+    <pre>.L0_2:
+    movq -32(%rbp), %rax
+    movq %rax, -128(%rbp)
+    movq -24(%rbp), %rax
+    movq %rax, -120(%rbp)
+    movq $31, -144(%rbp)
+    movq $0, -136(%rbp)
+    movq -128(%rbp), %rax
+    imulq -144(%rbp), %rax
+    movq %rax, -160(%rbp)
+    movq -64(%rbp), %rax
+    movq %rax, -176(%rbp)
+    movq -56(%rbp), %rax
+    movq %rax, -168(%rbp)
+    movq -160(%rbp), %rax
+    addq -176(%rbp), %rax
+    movq %rax, -192(%rbp)
+    ...                              ; 一共 30 条，还没算完</pre>
+    <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+      每个中间值都有一个栈槽，每条指令都要把它搬进 <code>%rax</code>、
+      算完再搬回去。<b>汇编 256 行。</b>
+    </div>
+  </div>
+  <div class="card">
+    <h3>寄存器版 <b>整个循环体就这四条</b></h3>
+    <pre>.L0_1:
+    cmpq $50000000, %rbx      ; 循环条件，比较直接进 jcc
+    jge  .L0_3
+.L0_2:
+    imulq $31, %r9, %rsi      ; 乘立即数，三操作数
+    addq  %rbx, %rsi          ; 和 += i
+    movq  %rsi, %r9
+    andq  $2147483647, %r9    ; 就地掩码
+    addq  $1, %rbx            ; i += 1
+    jmp .L0_1</pre>
+    <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+      值和变量都在寄存器里；块尾跳下一块时不发 <code>jmp</code>，
+      假分支在下面时把条件反过来。<b>汇编 193 行，热循环 2.61 倍。</b>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>实测 <b>同一批程序，三种产物</b></h3>
+  <table>
+    <tr><th>用例</th><th>gcc -O2</th><th>栈机</th><th>寄存器</th><th>栈机→寄存器</th><th>与 gcc</th></tr>
+    <tr><td>热循环 3 千万次</td><td>54ms</td><td>178ms</td><td><b>68ms</b></td><td>2.61×</td><td>1.23×</td></tr>
+    <tr><td>混合 5 千万次（乘加掩码链）</td><td>68ms</td><td>177ms</td><td><b>68ms</b></td><td>2.60×</td><td>1.00×</td></tr>
+    <tr><td>整除 3 千万次（<code>%7</code> / <code>//3</code>）</td><td>31ms</td><td>126ms</td><td><b>46ms</b></td><td>2.73×</td><td>1.48×</td></tr>
+    <tr><td>调用 5 千万次</td><td>81ms</td><td>225ms</td><td><b>78ms</b></td><td>2.88×</td><td><b>0.92×</b></td></tr>
+    <tr><td>斐波那契 fib(35)（2400 万次递归）</td><td>12ms</td><td>85ms</td><td><b>45ms</b></td><td>1.88×</td><td>3.75×</td></tr>
+  </table>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    调用那一项<b>反超</b> gcc：gcc 把小函数全内联进去，代码膨胀反而拖慢了指令缓存。
+    斐波那契差 3.75 倍，原因不在调用开销——gcc 把 <code>fib(n-1)+fib(n-2)</code>
+    整个改写成了嵌套循环加累加器，那是另一件事，这版没做。
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>除以常数 <b>把 idiv 换成乘魔数，而且编译期当场验</b></h3>
+  <pre>x // d  ==  (|x| * M) >> (64 + s)      M = ceil(2^(64+s) / d)
+x %  d  ==  x - (x // d) * d
+
+; 3 千万次 i % 7 + i // 3
+movq  %rbx, %rax
+movq  %rax, %rcx
+sarq  $63, %rcx          ; 符号
+xorq  %rcx, %rax
+subq  %rcx, %rax         ; |x|
+movabsq $10540996613548315210, %rdx
+mulq  %rdx               ; 高 64 位就是商
+shrq  $2, %rdx
+movq  %rdx, %rax
+xorq  %rcx, %rax
+subq  %rcx, %rax         ; 贴回符号</pre>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    魔数算错一位，结果会从某个输入开始<b>整片地错</b>，而且只在某些数上错。
+    所以编译器算完之后，当场拿一批样本（±1、±d、±2<sup>62</sup>、随机数）验一遍：
+    <code>if (应 != q) return 0;</code> —— 验不过就老老实实用 <code>idiv</code>。
+    写错了最多让程序变慢，不会让它算错。
+  </div>
+</div>
+
 </body>
 </html>
