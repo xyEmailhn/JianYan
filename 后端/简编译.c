@@ -66,6 +66,9 @@ static const char *C型(类型 *t)
     case 型_浮点:   return "double";
     case 型_字符串: return "简字";
     case 型_图:     return "简图";
+    case 型_大整数: return "简大整";
+    case 型_小数:   return "简小数";
+    case 型_声音:   return "简声";
     case 型_组:     return "简组";
     case 型_映射:   return "简映";
     case 型_结果:   return "简果";
@@ -317,7 +320,10 @@ static void 写运行时(void)
     行("    return g;");
     行("}");
     行("static void 简_越界(int64_t i, int64_t n) {");
-    行("    fprintf(stderr, \"下标越界：%lld，长度 %lld\\n\", (long long)i, (long long)n);");
+    /* 注意 `%%lld`：行() 本身是 vfprintf，单个 % 会被当成它自己的格式符，
+     * 于是生成的 C 里那行 fprintf 就丢了占位符，越界时报出来的是两个垃圾数。
+     * 这个 bug 藏了很久——因为只有真越界时才会走到这里。 */
+    行("    fprintf(stderr, \"下标越界：%%lld，长度 %%lld\\n\", (long long)i, (long long)n);");
     行("    exit(6);");
     行("}");
     行("");
@@ -636,6 +642,84 @@ static void 写运行时(void)
     行("    if (s.n) memcpy(p, s.p, (size_t)s.n);");
     行("    p[s.n] = 0;");
     行("    return p;");
+    行("}");
+    行("");
+    行("/* ---- 大整数与小数 ----");
+    行("   两者在 C 里都只是一个指针，指向第三方库内部的结构（mp_int / mpd_t）。");
+    行("   语言层永远看不见那个结构，所以用 void * 过桥：生成的 C 不 include");
+    行("   任何第三方头文件，三万行 tommath 也就不必跟着每个 .jy 重编一遍。");
+    行("");
+    行("   三条约定，改之前先看规范第 13 节：");
+    行("     1. 不可变 —— 运算都返回新对象，不改入参。所以复制指针是安全的，");
+    行("        赋值、传参、当返回值都不用深拷贝。");
+    行("     2. 不回收 —— 没有引用计数，对象活到进程结束（跟 图 一样）。");
+    行("     3. 不崩 —— 整数除零得 0，负数开方得 0，指数越界得 0，小数除零得 无穷。");
+    行("        错误的细节需要的话，自己用 比 和 位 去判。 */");
+    行("typedef void *简大整;");
+    行("typedef void *简小数;");
+    行("extern void *简_大_从整(long long v);");
+    行("extern void *简_大_读(const char *s, long long 长, char *错);");
+    行("extern void *简_大_加(const void *a, const void *b);");
+    行("extern void *简_大_减(const void *a, const void *b);");
+    行("extern void *简_大_乘(const void *a, const void *b);");
+    行("extern void *简_大_除(const void *a, const void *b);");
+    行("extern void *简_大_余(const void *a, const void *b);");
+    行("extern void *简_大_幂(const void *a, long long e);");
+    行("extern void *简_大_根(const void *a);");
+    行("extern long long 简_大_比(const void *a, const void *b);");
+    行("extern long long 简_大_位(const void *a);");
+    行("extern char *简_大_文(const void *a);");
+    行("extern void 简_小_定精度(long long 位);");
+    行("extern long long 简_小_取精度(void);");
+    行("extern void *简_小_从浮(double v);");
+    行("extern void *简_小_读(const char *s, long long 长, char *错);");
+    行("extern void *简_小_加(const void *a, const void *b);");
+    行("extern void *简_小_减(const void *a, const void *b);");
+    行("extern void *简_小_乘(const void *a, const void *b);");
+    行("extern void *简_小_除(const void *a, const void *b);");
+    行("extern long long 简_小_比(const void *a, const void *b);");
+    行("extern char *简_小_文(const void *a);");
+    行("");
+    行("/* ---- 声音 ----");
+    行("   采样是 float32、交错存放；一帧 = 所有声道在同一时刻的采样。");
+    行("   跟 图 一样是句柄：赋值只搬 32 字节的头，两个变量指向同一片采样。");
+    行("   要独立副本就 .放大 / .归一化 —— 它们本来就要逐样本算，顺手拷一份。");
+    行("   解码与编码在 lib简言图.a 里（dr_wav / dr_mp3），这里只有声明。 */");
+    行("typedef struct { int64_t 帧数, 声道, 采样率; float *样本; } 简声;");
+    行("extern float *简_声_载(const char *路径, long long *帧数, long long *声道,");
+    行("                       long long *采样率, char *错);");
+    行("extern int 简_声_存(const char *路径, const float *样本, long long 帧数,");
+    行("                    long long 声道, long long 采样率);");
+    行("extern float *简_声_新(long long 帧数, long long 声道);");
+    行("extern float 简_声_取(const float *样本, long long 帧数, long long 声道数,");
+    行("                      long long 帧, long long 声道);");
+    行("extern void 简_声_设(float *样本, long long 帧数, long long 声道数,");
+    行("                     long long 帧, long long 声道, double 值);");
+    行("");
+    行("static 简声 简_声_拷(简声 s) {");
+    行("    简声 r = s;");
+    行("    size_t 个 = (size_t)s.帧数 * (size_t)s.声道;");
+    行("    if (!s.样本 || 个 == 0) { r.样本 = NULL; return r; }");
+    行("    r.样本 = (float *)malloc(个 * sizeof(float));");
+    行("    if (!r.样本) { fputs(\"声音：内存不够\\n\", stderr); exit(7); }");
+    行("    memcpy(r.样本, s.样本, 个 * sizeof(float));");
+    行("    return r;");
+    行("}");
+    行("/* 放大与归一化都先拷一份再改，原声音一个字节都不动——");
+    行("   句柄语义下原地改会悄悄改掉调用方手里的那份。 */");
+    行("static 简声 简_声_倍(简声 s, double k) {");
+    行("    简声 r = 简_声_拷(s);");
+    行("    size_t 个 = (size_t)r.帧数 * (size_t)r.声道, i;");
+    行("    for (i = 0; i < 个; i++) r.样本[i] = (float)((double)r.样本[i] * k);");
+    行("    return r;");
+    行("}");
+    行("static 简声 简_声_归(简声 s) {");
+    行("    size_t 个 = (size_t)s.帧数 * (size_t)s.声道, i;");
+    行("    double 峰 = 0.0;");
+    行("    if (!s.样本 || 个 == 0) return s;");
+    行("    for (i = 0; i < 个; i++) { double v = (double)s.样本[i]; if (v < 0) v = -v; if (v > 峰) 峰 = v; }");
+    行("    if (峰 <= 0.0) return 简_声_拷(s);");
+    行("    return 简_声_倍(s, 0.98 / 峰);");
     行("}");
     行("");
 }
@@ -1024,6 +1108,113 @@ static void 写指令(中间函数 *f, 指令 *q)
             return;
         }
 
+        /* ---- 声音：两个自由函数 ----
+         * 音频的"路径"是文件路径，同样要补 NUL 才能交给 fopen。 */
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "载入声音", 12) && q->多量 >= 1) {
+            fprintf(出, "    { long long _n = 0, _ch = 0, _sr = 0; char _e[256]; _e[0] = 0;\n");
+            fprintf(出, "      char *_path = 简_路径(");
+            值名(q->多[0]);
+            fprintf(出, ");\n");
+            fprintf(出, "      float *_p = 简_声_载(_path, &_n, &_ch, &_sr, _e);\n");
+            fprintf(出, "      free(_path);\n");
+            fprintf(出, "      if (_p) { 简声 _s; _s.帧数 = _n; _s.声道 = _ch; _s.采样率 = _sr; _s.样本 = _p;\n");
+            fprintf(出, "        ");
+            值名(果);
+            fprintf(出, " = 简_果造(1, &_s, (int)sizeof(_s)); }\n");
+            fprintf(出, "      else { size_t _k = strlen(_e); char *_d = (char *)malloc(_k + 1);\n");
+            fprintf(出, "        memcpy(_d, _e, _k + 1); 简字 _m = 简_字(_d, (int64_t)_k);\n");
+            fprintf(出, "        ");
+            值名(果);
+            fprintf(出, " = 简_果造(0, &_m, (int)sizeof(_m)); } }\n");
+            return;
+        }
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "新建声音", 12) && q->多量 >= 3) {
+            fprintf(出, "    { 简声 _s; _s.帧数 = (int64_t)");
+            值名(q->多[0]);
+            fprintf(出, "; _s.采样率 = (int64_t)");
+            值名(q->多[1]);
+            fprintf(出, "; _s.声道 = (int64_t)");
+            值名(q->多[2]);
+            fprintf(出, ";\n");
+            fprintf(出, "      _s.样本 = 简_声_新(_s.帧数, _s.声道);\n");
+            fprintf(出, "      if (!_s.样本) { fputs(\"新建声音：帧数、声道、采样率都要大于 0\\n\", stderr); exit(7); }\n");
+            fprintf(出, "      ");
+            值名(果);
+            fprintf(出, " = _s; }\n");
+            return;
+        }
+
+        /* ---- 大数与小数 ----
+         *
+         * 六个入口全是"薄包装"：真正算的地方在 lib简言图.a 里。
+         * 读类函数（读大数/读小数）可能失败，因此和 读图 一样包一层 结果，
+         * 失败信息同样要拷到堆上——简_果造 只按位拷贝 简字 结构体。 */
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "大数", 6) && q->多量 >= 1) {
+            fprintf(出, "    ");
+            if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+            fprintf(出, "简_大_从整((long long)");
+            值名(q->多[0]);
+            fprintf(出, ");\n");
+            return;
+        }
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "变小数", 9) && q->多量 >= 1) {
+            fprintf(出, "    ");
+            if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+            fprintf(出, "简_小_从浮((double)");
+            值名(q->多[0]);
+            fprintf(出, ");\n");
+            return;
+        }
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "定小数精度", 15) && q->多量 >= 1) {
+            fprintf(出, "    简_小_定精度((long long)");
+            值名(q->多[0]);
+            fprintf(出, ");\n");
+            if (果 >= 0) { fprintf(出, "    "); 值名(果); fprintf(出, " = 0;\n"); }
+            return;
+        }
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "小数精度", 12) && q->多量 == 0) {
+            fprintf(出, "    ");
+            if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+            fprintf(出, "简_小_取精度();\n");
+            return;
+        }
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "读大数", 9) && q->多量 >= 1) {
+            fprintf(出, "    { char _e[256]; _e[0] = 0;\n");
+            fprintf(出, "      char *_s = 简_路径(");
+            值名(q->多[0]);
+            fprintf(出, ");\n");
+            fprintf(出, "      void *_v = 简_大_读(_s, (long long)");
+            值名(q->多[0]);
+            fprintf(出, ".n, _e);\n");
+            fprintf(出, "      free(_s);\n");
+            fprintf(出, "      if (_v) { 简大整 _g = _v;\n        ");
+            值名(果);
+            fprintf(出, " = 简_果造(1, &_g, (int)sizeof(_g)); }\n");
+            fprintf(出, "      else { size_t _n = strlen(_e); char *_d = (char *)malloc(_n + 1);\n");
+            fprintf(出, "        memcpy(_d, _e, _n + 1); 简字 _m = 简_字(_d, (int64_t)_n);\n        ");
+            值名(果);
+            fprintf(出, " = 简_果造(0, &_m, (int)sizeof(_m)); } }\n");
+            return;
+        }
+        if (q->文 && !用户函数 && 名同(q->文, q->文长, "读小数", 9) && q->多量 >= 1) {
+            fprintf(出, "    { char _e[256]; _e[0] = 0;\n");
+            fprintf(出, "      char *_s = 简_路径(");
+            值名(q->多[0]);
+            fprintf(出, ");\n");
+            fprintf(出, "      void *_v = 简_小_读(_s, (long long)");
+            值名(q->多[0]);
+            fprintf(出, ".n, _e);\n");
+            fprintf(出, "      free(_s);\n");
+            fprintf(出, "      if (_v) { 简小数 _g = _v;\n        ");
+            值名(果);
+            fprintf(出, " = 简_果造(1, &_g, (int)sizeof(_g)); }\n");
+            fprintf(出, "      else { size_t _n = strlen(_e); char *_d = (char *)malloc(_n + 1);\n");
+            fprintf(出, "        memcpy(_d, _e, _n + 1); 简字 _m = 简_字(_d, (int64_t)_n);\n        ");
+            值名(果);
+            fprintf(出, " = 简_果造(0, &_m, (int)sizeof(_m)); } }\n");
+            return;
+        }
+
         /* 文 为空：被调是一个函数值（函数指针） */
         if (!q->文) {
             int 无值 = (q->型 && q->型->种 == 型_空);
@@ -1130,6 +1321,32 @@ static void 写指令(中间函数 *f, 指令 *q)
             值名(q->甲);
             fprintf(出, ".%s;\n", 名同(m, ml, "宽", 3) ? "宽" : "高");
             return;
+        }
+
+        if (ot && ot->种 == 型_声音) {
+            if (名同(m, ml, "帧数", 6) || 名同(m, ml, "采样率", 9) || 名同(m, ml, "声道", 6)) {
+                fprintf(出, "    ");
+                值名(果);
+                fprintf(出, " = ");
+                值名(q->甲);
+                fprintf(出, ".%s;\n",
+                        名同(m, ml, "帧数", 6) ? "帧数" :
+                        名同(m, ml, "采样率", 9) ? "采样率" : "声道");
+                return;
+            }
+            if (名同(m, ml, "时长", 6)) {
+                /* 采样率为 0 只在构造失败时出现，那时 帧数 也是 0，给 0.0 就行 */
+                fprintf(出, "    ");
+                值名(果);
+                fprintf(出, " = ");
+                值名(q->甲);
+                fprintf(出, ".采样率 > 0 ? (double)");
+                值名(q->甲);
+                fprintf(出, ".帧数 / (double)");
+                值名(q->甲);
+                fprintf(出, ".采样率 : 0.0;\n");
+                return;
+            }
         }
 
         if (ot && ot->种 == 型_可空) {
@@ -1552,6 +1769,218 @@ static void 写指令(中间函数 *f, 指令 *q)
                 return;
             }
             fprintf(stderr, "后端还没实现图的方法：%.*s\n", ml, m);
+            exit(4);
+        }
+
+        if (ot && ot->种 == 型_声音) {
+            if (名同(m, ml, "取", 3)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = (double)"); }
+                fprintf(出, "简_声_取(");
+                值名(q->甲);
+                fprintf(出, ".样本, ");
+                值名(q->甲);
+                fprintf(出, ".帧数, ");
+                值名(q->甲);
+                fprintf(出, ".声道, ");
+                值名(q->多[0]);
+                fprintf(出, ", ");
+                值名(q->多[1]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "设", 3)) {
+                fprintf(出, "    简_声_设(");
+                值名(q->甲);
+                fprintf(出, ".样本, ");
+                值名(q->甲);
+                fprintf(出, ".帧数, ");
+                值名(q->甲);
+                fprintf(出, ".声道, ");
+                值名(q->多[0]);
+                fprintf(出, ", ");
+                值名(q->多[1]);
+                fprintf(出, ", (double)");
+                值名(q->多[2]);
+                fprintf(出, ");\n");
+                if (果 >= 0) { fprintf(出, "    "); 值名(果); fprintf(出, " = 0;\n"); }
+                return;
+            }
+            if (名同(m, ml, "混", 3)) {
+                /* 累加而不是覆盖：合成和弦时，三个正弦要落在同一帧上。
+                 * 边界检查照抄 简_声_设 的口径，越界就当没发生。 */
+                fprintf(出, "    { 简声 _s = ");
+                值名(q->甲);
+                fprintf(出, "; long long _f = (long long)");
+                值名(q->多[0]);
+                fprintf(出, ", _c = (long long)");
+                值名(q->多[1]);
+                fprintf(出, ";\n");
+                fprintf(出, "      if (_s.样本 && _f >= 0 && _f < _s.帧数 && _c >= 0 && _c < _s.声道)\n");
+                fprintf(出, "          _s.样本[_f * _s.声道 + _c] += (float)((double)");
+                值名(q->多[2]);
+                fprintf(出, "); }\n");
+                if (果 >= 0) { fprintf(出, "    "); 值名(果); fprintf(出, " = 0;\n"); }
+                return;
+            }
+            if (名同(m, ml, "存", 3)) {
+                fprintf(出, "    { char *_path = 简_路径(");
+                值名(q->多[0]);
+                fprintf(出, ");\n");
+                fprintf(出, "      int _ok = 简_声_存(_path, ");
+                值名(q->甲);
+                fprintf(出, ".样本, ");
+                值名(q->甲);
+                fprintf(出, ".帧数, ");
+                值名(q->甲);
+                fprintf(出, ".声道, ");
+                值名(q->甲);
+                fprintf(出, ".采样率);\n");
+                fprintf(出, "      free(_path);\n");
+                fprintf(出, "      if (_ok)  ");
+                值名(果);
+                fprintf(出, " = 简_果造(1, 0, 0);\n");
+                fprintf(出, "      else { static const char _msg[] = ");
+                fprintf(出, "\"存不进去：检查扩展名（wav）和目录权限\";\n");
+                fprintf(出, "        简字 _m = 简_字(_msg, (int64_t)strlen(_msg));\n");
+                fprintf(出, "        ");
+                值名(果);
+                fprintf(出, " = 简_果造(0, &_m, (int)sizeof(_m)); } }\n");
+                return;
+            }
+            if (名同(m, ml, "放大", 6)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "简_声_倍(");
+                值名(q->甲);
+                fprintf(出, ", (double)");
+                值名(q->多[0]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "归一化", 9)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "简_声_归(");
+                值名(q->甲);
+                fprintf(出, ");\n");
+                return;
+            }
+            fprintf(stderr, "后端还没实现声音的方法：%.*s\n", ml, m);
+            exit(4);
+        }
+
+        if (ot && ot->种 == 型_大整数) {
+            /* 二元四则 + 余：全是同一个模子，名字表和 C 函数名对得上 */
+            static const struct { const char *名; const char *c; } 二元[] = {
+                { "加", "简_大_加" }, { "减", "简_大_减" },
+                { "乘", "简_大_乘" }, { "除", "简_大_除" },
+                { "余", "简_大_余" },
+            };
+            for (int i = 0; i < (int)(sizeof(二元) / sizeof(二元[0])); i++) {
+                if (!名同(m, ml, 二元[i].名, 3)) continue;
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "%s(", 二元[i].c);
+                值名(q->甲);
+                fprintf(出, ", ");
+                值名(q->多[0]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "幂", 3)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "简_大_幂(");
+                值名(q->甲);
+                fprintf(出, ", (long long)");
+                值名(q->多[0]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "根", 3)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "简_大_根(");
+                值名(q->甲);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "比", 3)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "简_大_比(");
+                值名(q->甲);
+                fprintf(出, ", ");
+                值名(q->多[0]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "位", 3)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "简_大_位(");
+                值名(q->甲);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "文本", 6)) {
+                /* 简_大_文 给的是 malloc 出来的 NUL 串，长度现算。
+                 * 不 free：简字 会跟着这个指针走，语言层没有 释放。 */
+                fprintf(出, "    { char *_s = 简_大_文(");
+                值名(q->甲);
+                fprintf(出, ");\n      ");
+                if (果 >= 0) {
+                    值名(果);
+                    fprintf(出, " = 简_字(_s, (int64_t)strlen(_s)); }\n");
+                } else {
+                    fprintf(出, "free(_s); }\n");
+                }
+                return;
+            }
+            fprintf(stderr, "后端还没实现大整数的方法：%.*s\n", ml, m);
+            exit(4);
+        }
+
+        if (ot && ot->种 == 型_小数) {
+            static const struct { const char *名; const char *c; } 二元[] = {
+                { "加", "简_小_加" }, { "减", "简_小_减" },
+                { "乘", "简_小_乘" }, { "除", "简_小_除" },
+            };
+            for (int i = 0; i < (int)(sizeof(二元) / sizeof(二元[0])); i++) {
+                if (!名同(m, ml, 二元[i].名, 3)) continue;
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "%s(", 二元[i].c);
+                值名(q->甲);
+                fprintf(出, ", ");
+                值名(q->多[0]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "比", 3)) {
+                fprintf(出, "    ");
+                if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+                fprintf(出, "简_小_比(");
+                值名(q->甲);
+                fprintf(出, ", ");
+                值名(q->多[0]);
+                fprintf(出, ");\n");
+                return;
+            }
+            if (名同(m, ml, "文本", 6)) {
+                fprintf(出, "    { char *_s = 简_小_文(");
+                值名(q->甲);
+                fprintf(出, ");\n      ");
+                if (果 >= 0) {
+                    值名(果);
+                    fprintf(出, " = 简_字(_s, (int64_t)strlen(_s)); }\n");
+                } else {
+                    fprintf(出, "free(_s); }\n");
+                }
+                return;
+            }
+            fprintf(stderr, "后端还没实现小数的方法：%.*s\n", ml, m);
             exit(4);
         }
 
