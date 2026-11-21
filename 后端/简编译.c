@@ -328,6 +328,31 @@ static void 写运行时(void)
     行("}");
     行("");
     行("static 简字 简_字(const char *p, int64_t n) { 简字 s; s.p = p; s.n = n; return s; }");
+    行("");
+    行("/* 字符串转数字。失败给一句人话，不要 printf 那种 'invalid argument'。");
+    行("   两头允许空格；中间或尾巴上有别的字符就当失败。 */");
+    行("static int 简_字转整(简字 s, long long *出, const char **错) {");
+    行("    char *b = (char *)malloc((size_t)s.n + 1);");
+    行("    if (!b) { *错 = \"内存不够\"; return 0; }");
+    行("    memcpy(b, s.p, (size_t)s.n); b[s.n] = 0;");
+    行("    char *e = NULL;");
+    行("    long long v = strtoll(b, &e, 10);");
+    行("    if (e == b) { free(b); *错 = \"这串字不是整数\"; return 0; }");
+    行("    while (*e == ' ' || *e == '\\t' || *e == '\\n' || *e == '\\r') e++;");
+    行("    if (*e) { free(b); *错 = \"这串字不是整数\"; return 0; }");
+    行("    *出 = v; free(b); return 1;");
+    行("}");
+    行("static int 简_字转浮(简字 s, double *出, const char **错) {");
+    行("    char *b = (char *)malloc((size_t)s.n + 1);");
+    行("    if (!b) { *错 = \"内存不够\"; return 0; }");
+    行("    memcpy(b, s.p, (size_t)s.n); b[s.n] = 0;");
+    行("    char *e = NULL;");
+    行("    double v = strtod(b, &e);");
+    行("    if (e == b) { free(b); *错 = \"这串字不是小数\"; return 0; }");
+    行("    while (*e == ' ' || *e == '\\t' || *e == '\\n' || *e == '\\r') e++;");
+    行("    if (*e) { free(b); *错 = \"这串字不是小数\"; return 0; }");
+    行("    *出 = v; free(b); return 1;");
+    行("}");
     行("static 简字 简_拼(简字 a, 简字 b) {");
     行("    char *p = (char *)malloc((size_t)(a.n + b.n + 1));");
     行("    if (!p) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
@@ -1351,11 +1376,14 @@ static void 写指令(中间函数 *f, 指令 *q)
 
         if (ot && ot->种 == 型_可空) {
             if (名同(m, ml, "有值", 6)) {
+                /* 字符串的可空值是 (指针, 长度) 结构，判 .n；
+                 * 其余（整数、浮点、图…）就是一个机器字，判它自己是不是 0。 */
+                int 串空 = ot->元素 && ot->元素->种 == 型_字符串;
                 fprintf(出, "    ");
                 值名(果);
                 fprintf(出, " = (");
                 值名(q->甲);
-                fprintf(出, ".n != 0);\n");
+                fprintf(出, 串空 ? ".n != 0);\n" : " != 0);\n");
                 return;
             }
         }
@@ -1570,6 +1598,25 @@ static void 写指令(中间函数 *f, 指令 *q)
                 fprintf(出, ".p, _k); ");
                 值名(果);
                 fprintf(出, " = _r; }\n");
+                return;
+            }
+            if (名同(m, ml, "或默认", 9)) {
+                /* 成败只看 .成：成功就把载荷摊成目标类型，失败直接给默认值。
+                 * 载荷按 min(载荷宽, 目标宽) 拷，跟 取值 一个规矩。 */
+                const char *ct = C型(q->型);
+                fprintf(出, "    { %s _r; memset(&_r, 0, sizeof(_r)); size_t _k = (size_t)(", ct);
+                值名(q->甲);
+                fprintf(出, ".宽 < (int)sizeof(_r) ? ");
+                值名(q->甲);
+                fprintf(出, ".宽 : (int)sizeof(_r)); memcpy(&_r, ");
+                值名(q->甲);
+                fprintf(出, ".p, _k); ");
+                值名(果);
+                fprintf(出, " = ");
+                值名(q->甲);
+                fprintf(出, ".成 ? _r : ");
+                值名(q->多[0]);
+                fprintf(出, "; }\n");
                 return;
             }
         }
@@ -2081,6 +2128,21 @@ static void 写指令(中间函数 *f, 指令 *q)
                 fprintf(出, ");\n");
                 return;
             }
+            if (名同(m, ml, "转整数", 9) || 名同(m, ml, "转浮点", 9)) {
+                int 整 = 名同(m, ml, "转整数", 9);
+                fprintf(出, "    { long long _i = 0; double _d = 0; const char *_e = 0; int _ok = %s(",
+                        整 ? "简_字转整" : "简_字转浮");
+                值名(q->甲);
+                fprintf(出, ", &%s, &_e);\n", 整 ? "_i" : "_d");
+                fprintf(出, "      if (_ok) ");
+                值名(果);
+                fprintf(出, " = 简_果造(1, &%s, (int)sizeof(%s));", 整 ? "_i" : "_d", 整 ? "_i" : "_d");
+                fprintf(出, " else { 简字 _s = 简_字(_e, (int64_t)strlen(_e)); ");
+                值名(果);
+                fprintf(出, " = 简_果造(0, &_s, (int)sizeof(_s)); } }\n");
+                return;
+            }
+
             if (名同(m, ml, "切分", 6)) {
                 fprintf(出, "    ");
                 值名(果);
