@@ -73,6 +73,8 @@ static const char *C型(类型 *t)
     case 型_映射:   return "简映";
     case 型_结果:   return "简果";
     case 型_通道:   return "简道";
+    case 型_套接字: return "简套";
+    case 型_监听器: return "简听";
     case 型_空:     return "void";
     case 型_布尔:   return "long long";
     case 型_整数: {
@@ -311,6 +313,14 @@ static void 写运行时(void)
     行("#include <string.h>");
     行("#include <math.h>");
     行("#include <stdint.h>");
+    行("#include <pthread.h>");
+    行("#include <sys/socket.h>");
+    行("#include <netinet/in.h>");
+    行("#include <netinet/tcp.h>");
+    行("#include <arpa/inet.h>");
+    行("#include <netdb.h>");
+    行("#include <unistd.h>");
+    行("#include <sys/time.h>");
     行("");
     行("typedef struct { const char *p; int64_t n; } 简字;");
     行("");
@@ -537,27 +547,237 @@ static void 写运行时(void)
     行("}");
     行("");
     行("/* ---- 通道 ----");
-    行("   环形缓冲。注意：IR 目前把 `线程 { }` 块内联成顺序执行，");
-    行("   所以这里不需要锁。等真并发了，加 mutex + cond 即可，接口不变。 */");
-    行("typedef struct { char *p; int64_t n, 容, 头; int 宽; int 关; } 简道;");
+    行("   定容环形缓冲，满了阻塞、空了等待、关了唤醒。");
+    行("   通道是**句柄**：`简道` 只有一个指针，状态全在堆上的 简道槽 里。");
+    行("   不这么做会出大事——通道按值拷一份（赋值、传参、线程捕获都算），");
+    行("   计数器 n 就成了各算各的：线程发了两个，主线程看见的还是 0，永远等下去。");
+    行("   而且 pthread_mutex_t 也不能拷。指针一包，两个问题一起没了。 */");
+    行("typedef struct {");
+    行("    char *p; int64_t n, 容, 头; int 宽, 关;");
+    行("    pthread_mutex_t m; pthread_cond_t 有货, 有空;");
+    行("} 简道槽;");
+    行("typedef struct { 简道槽 *s; } 简道;");
     行("static 简道 简_通道(int64_t 容, int 宽) {");
-    行("    简道 c; c.宽 = 宽; c.n = 0; c.头 = 0; c.关 = 0;");
-    行("    c.容 = 容 > 0 ? 容 : 1;");
-    行("    c.p = (char *)malloc((size_t)(c.容 * 宽 + 1));");
-    行("    if (!c.p) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
+    行("    简道 c;");
+    行("    c.s = (简道槽 *)calloc(1, sizeof(简道槽));");
+    行("    if (!c.s) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
+    行("    c.s->宽 = 宽;");
+    行("    c.s->容 = 容 > 0 ? 容 : 1;");
+    行("    c.s->p = (char *)malloc((size_t)(c.s->容 * 宽 + 1));");
+    行("    if (!c.s->p) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
+    行("    pthread_mutex_init(&c.s->m, NULL);");
+    行("    pthread_cond_init(&c.s->有货, NULL);");
+    行("    pthread_cond_init(&c.s->有空, NULL);");
     行("    return c;");
     行("}");
     行("static void 简_发(简道 *c, const void *v) {");
-    行("    if (c->n >= c->容) { fputs(\"通道满了\\n\", stderr); return; }");
-    行("    memcpy(c->p + ((c->头 + c->n) %% c->容) * c->宽, v, (size_t)c->宽);");
-    行("    c->n++;");
+    行("    简道槽 *s = c->s;");
+    行("    pthread_mutex_lock(&s->m);");
+    行("    while (s->n >= s->容 && !s->关) pthread_cond_wait(&s->有空, &s->m);");
+    行("    if (!s->关) {");
+    行("        memcpy(s->p + ((s->头 + s->n) %% s->容) * s->宽, v, (size_t)s->宽);");
+    行("        s->n++;");
+    行("        pthread_cond_signal(&s->有货);");
+    行("    }");
+    行("    pthread_mutex_unlock(&s->m);");
     行("}");
     行("static int 简_收(简道 *c, void *出) {");
-    行("    if (c->n <= 0) { memset(出, 0, (size_t)c->宽); return 0; }");
-    行("    memcpy(出, c->p + c->头 * c->宽, (size_t)c->宽);");
-    行("    c->头 = (c->头 + 1) %% c->容;");
-    行("    c->n--;");
+    行("    简道槽 *s = c->s;");
+    行("    pthread_mutex_lock(&s->m);");
+    行("    while (s->n <= 0 && !s->关) pthread_cond_wait(&s->有货, &s->m);");
+    行("    if (s->n <= 0) {");
+    行("        pthread_mutex_unlock(&s->m);");
+    行("        memset(出, 0, (size_t)s->宽);");
+    行("        return 0;");
+    行("    }");
+    行("    memcpy(出, s->p + s->头 * s->宽, (size_t)s->宽);");
+    行("    s->头 = (s->头 + 1) %% s->容;");
+    行("    s->n--;");
+    行("    pthread_cond_signal(&s->有空);");
+    行("    pthread_mutex_unlock(&s->m);");
     行("    return 1;");
+    行("}");
+    行("static void 简_关道(简道 *c) {");
+    行("    简道槽 *s = c->s;");
+    行("    pthread_mutex_lock(&s->m);");
+    行("    s->关 = 1;");
+    行("    pthread_cond_broadcast(&s->有货);");
+    行("    pthread_cond_broadcast(&s->有空);");
+    行("    pthread_mutex_unlock(&s->m);");
+    行("}");
+    行("");
+    行("/* ---- TCP：套接字与监听器 ----");
+    行("   两个都是句柄，里面只有一个 fd。关掉就把 fd 设成 -1，");
+    行("   再关一次、再读写都不至于把别人的 fd 关掉。 */");
+    行("typedef struct { int fd; } 简套;");
+    行("static 简字 简_网空(void) { 简字 s; s.p = \"\"; s.n = 0; return s; }");
+    行("typedef struct { int fd; } 简听;");
+    行("static 简果 简_网错(简字 原因) { return 简_果造(0, &原因, (int)sizeof(简字)); }");
+    行("static 简字 简_抄字节(const char *p, int64_t n) {");
+    行("    char *q = (char *)malloc((size_t)n + 1);");
+    行("    if (!q) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
+    行("    if (n) memcpy(q, p, (size_t)n);");
+    行("    q[n] = 0;");
+    行("    简字 s; s.p = q; s.n = n; return s;");
+    行("}");
+    行("static 简字 简_网因(const char *文) { return 简_抄字节(文, (int64_t)strlen(文)); }");
+    行("static 简果 简_连接(简字 主机, int64_t 端口) {");
+    行("    char 主[512];");
+    行("    int64_t hn = 主机.n < 511 ? 主机.n : 511;");
+    行("    if (hn > 0) memcpy(主, 主机.p, (size_t)hn);");
+    行("    主[hn] = 0;");
+    行("    char 服[16];");
+    行("    snprintf(服, sizeof(服), \"%%lld\", (long long)端口);");
+    行("    struct addrinfo 提, *答 = NULL;");
+    行("    memset(&提, 0, sizeof(提));");
+    行("    提.ai_family = AF_UNSPEC;");
+    行("    提.ai_socktype = SOCK_STREAM;");
+    行("    if (getaddrinfo(主, 服, &提, &答) != 0) return 简_网错(简_网因(\"域名解析不了\"));");
+    行("    int fd = -1;");
+    行("    for (struct addrinfo *a = 答; a; a = a->ai_next) {");
+    行("        fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);");
+    行("        if (fd < 0) continue;");
+    行("        if (connect(fd, a->ai_addr, a->ai_addrlen) == 0) break;");
+    行("        close(fd); fd = -1;");
+    行("    }");
+    行("    freeaddrinfo(答);");
+    行("    if (fd < 0) return 简_网错(简_网因(\"连不上\"));");
+    行("    int 一 = 1;");
+    行("    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &一, sizeof(一));");
+    行("    简套 s; s.fd = fd;");
+    行("    return 简_果造(1, &s, (int)sizeof(简套));");
+    行("}");
+    行("static 简果 简_监听(int64_t 端口) {");
+    行("    int fd = socket(AF_INET, SOCK_STREAM, 0);");
+    行("    if (fd < 0) return 简_网错(简_网因(\"建不了套接字\"));");
+    行("    int 一 = 1;");
+    行("    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &一, sizeof(一));");
+    行("    struct sockaddr_in 地;");
+    行("    memset(&地, 0, sizeof(地));");
+    行("    地.sin_family = AF_INET;");
+    行("    地.sin_addr.s_addr = htonl(INADDR_ANY);");
+    行("    地.sin_port = htons((uint16_t)端口);");
+    行("    if (bind(fd, (struct sockaddr *)&地, sizeof(地)) != 0) {");
+    行("        close(fd);");
+    行("        return 简_网错(简_网因(\"端口被占用了\"));");
+    行("    }");
+    行("    if (listen(fd, 64) != 0) { close(fd); return 简_网错(简_网因(\"监听失败\")); }");
+    行("    简听 l; l.fd = fd;");
+    行("    return 简_果造(1, &l, (int)sizeof(简听));");
+    行("}");
+    行("static 简字 简_套读(简套 *s, int64_t 最多) {");
+    行("    if (s->fd < 0 || 最多 <= 0) return 简_网空();");
+    行("    char *b = (char *)malloc((size_t)最多);");
+    行("    if (!b) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
+    行("    ssize_t n = recv(s->fd, b, (size_t)最多, 0);");
+    行("    if (n <= 0) { free(b); return 简_网空(); }");
+    行("    简字 r; r.p = b; r.n = (int64_t)n; return r;");
+    行("}");
+    行("static int64_t 简_套写(简套 *s, 简字 d) {");
+    行("    if (s->fd < 0) return -1;");
+    行("    int64_t 写 = 0;");
+    行("    while (写 < d.n) {");
+    行("        ssize_t n = send(s->fd, d.p + 写, (size_t)(d.n - 写), MSG_NOSIGNAL);");
+    行("        if (n <= 0) break;");
+    行("        写 += (int64_t)n;");
+    行("    }");
+    行("    return 写;");
+    行("}");
+    行("static 简字 简_套读全(简套 *s) {");
+    行("    int64_t 容 = 4096, 有 = 0;");
+    行("    char *b = (char *)malloc((size_t)容);");
+    行("    if (!b) { fputs(\"内存不够了\\n\", stderr); exit(3); }");
+    行("    for (;;) {");
+    行("        if (有 == 容) { 容 *= 2; b = (char *)realloc(b, (size_t)容);");
+    行("            if (!b) { fputs(\"内存不够了\\n\", stderr); exit(3); } }");
+    行("        ssize_t n = recv(s->fd, b + 有, (size_t)(容 - 有), 0);");
+    行("        if (n <= 0) break;");
+    行("        有 += (int64_t)n;");
+    行("    }");
+    行("    简字 r; r.p = b; r.n = 有; return r;");
+    行("}");
+    行("static void 简_套超时(简套 *s, int64_t 毫秒) {");
+    行("    if (s->fd < 0) return;");
+    行("    struct timeval t;");
+    行("    t.tv_sec = (time_t)(毫秒 / 1000);");
+    行("    t.tv_usec = (suseconds_t)((毫秒 %% 1000) * 1000);");
+    行("    setsockopt(s->fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t));");
+    行("    setsockopt(s->fd, SOL_SOCKET, SO_SNDTIMEO, &t, sizeof(t));");
+    行("}");
+    行("static 简字 简_套对端(简套 *s) {");
+    行("    if (s->fd < 0) return 简_网空();");
+    行("    struct sockaddr_in 地;");
+    行("    socklen_t 长 = sizeof(地);");
+    行("    if (getpeername(s->fd, (struct sockaddr *)&地, &长) != 0) return 简_网空();");
+    行("    char 主[64];");
+    行("    inet_ntop(AF_INET, &地.sin_addr, 主, sizeof(主));");
+    行("    char 全[96];");
+    行("    int n = snprintf(全, sizeof(全), \"%%s:%%d\", 主, (int)ntohs(地.sin_port));");
+    行("    return 简_抄字节(全, n);");
+    行("}");
+    行("static void 简_套关(简套 *s) { if (s->fd >= 0) { close(s->fd); s->fd = -1; } }");
+    行("static 简果 简_接受(简听 *l) {");
+    行("    if (l->fd < 0) return 简_网错(简_网因(\"监听器已经关了\"));");
+    行("    int fd = accept(l->fd, NULL, NULL);");
+    行("    if (fd < 0) return 简_网错(简_网因(\"接受失败\"));");
+    行("    int 一 = 1;");
+    行("    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &一, sizeof(一));");
+    行("    简套 s; s.fd = fd;");
+    行("    return 简_果造(1, &s, (int)sizeof(简套));");
+    行("}");
+    行("static int64_t 简_听端口(简听 *l) {");
+    行("    if (l->fd < 0) return 0;");
+    行("    struct sockaddr_in 地;");
+    行("    socklen_t 长 = sizeof(地);");
+    行("    if (getsockname(l->fd, (struct sockaddr *)&地, &长) != 0) return 0;");
+    行("    return (int64_t)ntohs(地.sin_port);");
+    行("}");
+    行("static void 简_听关(简听 *l) { if (l->fd >= 0) { close(l->fd); l->fd = -1; } }");
+    行("/* HTTP 客户端：够用就行的 GET。");
+    行("   只认 http://（明文），只发 HTTP/1.0——1.0 下对端回完就关，");
+    行("   读全部正好读到结尾，不用自己判 Content-Length 和分块。 */");
+    行("static 简果 简_HTTP取(简字 网址) {");
+    行("    char 址[1024];");
+    行("    int64_t n = 网址.n < 1023 ? 网址.n : 1023;");
+    行("    if (n > 0) memcpy(址, 网址.p, (size_t)n);");
+    行("    址[n] = 0;");
+    行("    const char *p = 址;");
+    行("    if (strncmp(p, \"http://\", 7) != 0) return 简_网错(简_网因(\"只认 http:// 开头的网址\"));");
+    行("    p += 7;");
+    行("    const char *斜 = strchr(p, '/');");
+    行("    char 主机[256];");
+    行("    const char *路 = \"/\";");
+    行("    int64_t 主机长;");
+    行("    if (斜) { 主机长 = 斜 - p; 路 = 斜; } else { 主机长 = (int64_t)strlen(p); }");
+    行("    if (主机长 > 255) 主机长 = 255;");
+    行("    memcpy(主机, p, (size_t)主机长);");
+    行("    主机[主机长] = 0;");
+    行("    int64_t 端口 = 80;");
+    行("    char *冒号 = strrchr(主机, ':');");
+    行("    if (冒号) { 端口 = atoll(冒号 + 1); *冒号 = 0; }");
+    行("    简字 主字 = 简_网因(主机);");
+    行("    简果 连 = 简_连接(主字, 端口);");
+    行("    if (!连.成) return 连;");
+    行("    简套 s; memcpy(&s, 连.p, sizeof(s));");
+    行("    char 请[2048];");
+    行("    int 请求长 = snprintf(请, sizeof(请),");
+    行("        \"GET %%s HTTP/1.0\\r\\nHost: %%s\\r\\nUser-Agent: 简言/0.15\\r\\nConnection: close\\r\\n\\r\\n\",");
+    行("        路, 主机);");
+    行("    简字 请字; 请字.p = 请; 请字.n = 请求长;");
+    行("    简_套写(&s, 请字);");
+    行("    简字 回 = 简_套读全(&s);");
+    行("    简_套关(&s);");
+    行("    return 简_果造(1, &回, (int)sizeof(简字));");
+    行("}");
+    行("/* 起线程：包装体由编译器就地生成，这里只管开。分离态——");
+    行("   主线程不等它，所以程序要自己保证该收的都收到了再退出。 */");
+    行("static void 简_起(void *(*f)(void *), void *包) {");
+    行("    pthread_t t;");
+    行("    if (pthread_create(&t, NULL, f, 包) != 0) {");
+    行("        fputs(\"起不了线程\\n\", stderr);");
+    行("        exit(4);");
+    行("    }");
+    行("    pthread_detach(t);");
     行("}");
     行("");
     行("/* ---- 字符串 ---- */");
@@ -806,6 +1026,8 @@ static int 是浮点值(中间函数 *f, int 号)
 
 static 中间函数 *找函数(const char *名, int 长);
 static int 形参借用(中间函数 *f, int i);
+static int 参数个数(中间函数 *f, int *编号);
+static void 转义名(char *缓, int 容, const char *名, int 长);
 
 static void 写指令(中间函数 *f, 指令 *q)
 {
@@ -1020,6 +1242,34 @@ static void 写指令(中间函数 *f, 指令 *q)
         else if (q->文 && q->文长 == 9 && memcmp(q->文, "打印行", 9) == 0) 内置 = 2;
         else if (q->文 && q->文长 == 6 && memcmp(q->文, "退出", 6) == 0) 内置 = 3;
         else if (q->文 && q->文长 == 6 && memcmp(q->文, "读入", 6) == 0) 内置 = 4;
+        else if (q->文 && q->文长 == 6 && memcmp(q->文, "连接", 6) == 0) 内置 = 5;
+        else if (q->文 && q->文长 == 6 && memcmp(q->文, "监听", 6) == 0) 内置 = 6;
+        else if (q->文 && q->文长 == 7 && memcmp(q->文, "HTTP取", 7) == 0) 内置 = 7;
+
+        /* 连接(主机, 端口) / 监听(端口)：主机参数只用来拼错误信息时不用，
+         * 这一版 监听 绑 INADDR_ANY——本机自测够用。 */
+        if (内置 == 5 || 内置 == 6 || 内置 == 7) {
+            fprintf(出, "    ");
+            if (果 >= 0) { 值名(果); fprintf(出, " = "); }
+            if (内置 == 5) {
+                fprintf(出, "简_连接(");
+                if (q->多量 > 0) 值名(q->多[0]);
+                else fputs("简_网空()", 出);
+                fprintf(出, ", ");
+                if (q->多量 > 1) 值名(q->多[1]); else fputs("0", 出);
+                fprintf(出, ");\n");
+            } else if (内置 == 6) {
+                fprintf(出, "简_监听(");
+                if (q->多量 > 1) 值名(q->多[1]); else fputs("0", 出);
+                fprintf(出, ");\n");
+            } else {
+                fprintf(出, "简_HTTP取(");
+                if (q->多量 > 0) 值名(q->多[0]);
+                else fputs("简_网空()", 出);
+                fprintf(出, ");\n");
+            }
+            return;
+        }
 
         if (内置 == 4) {
             fprintf(出, "    ");
@@ -1424,12 +1674,44 @@ static void 写指令(中间函数 *f, 指令 *q)
      * 组和字符串的方法是语言自带的能力，不走用户代码，直接展开成运行时调用。
      * 展开而不是包一层函数，是因为元素类型只有这里知道：
      * 同一个「取」，对 整数组 是 long long，对 字符串组 是 简字。 */
-    case 指_调用方法: {
+     case 指_调用方法: {
         类型 *ot = 值型(f, q->甲);
         const char *m = q->文 ? q->文 : "";
         int ml = q->文长;
         int 是组 = ot && ot->种 == 型_组;
         int 是串 = ot && ot->种 == 型_字符串;
+
+        /* 网络：套接字和监听器。都是句柄，方法一律传 &对象。 */
+        if (ot && (ot->种 == 型_套接字 || ot->种 == 型_监听器)) {
+            int 是套 = ot->种 == 型_套接字;
+            const char *调 = NULL;
+            int 带参 = 0;
+            if (是套) {
+                if (名同(m, ml, "读", 3))       { 调 = "简_套读";  带参 = 1; }
+                else if (名同(m, ml, "写", 3))  { 调 = "简_套写";  带参 = 1; }
+                else if (名同(m, ml, "读全部", 9)) 调 = "简_套读全";
+                else if (名同(m, ml, "设超时", 9)) { 调 = "简_套超时"; 带参 = 1; }
+                else if (名同(m, ml, "对端", 6))  调 = "简_套对端";
+                else if (名同(m, ml, "关闭", 6))  调 = "简_套关";
+            } else {
+                if (名同(m, ml, "接受", 6))     调 = "简_接受";
+                else if (名同(m, ml, "端口", 6)) 调 = "简_听端口";
+                else if (名同(m, ml, "关闭", 6)) 调 = "简_听关";
+            }
+            if (调) {
+                int 无返回 = 名同(m, ml, "关闭", 6);
+                fprintf(出, "    ");
+                if (果 >= 0 && !无返回) { 值名(果); fputs(" = ", 出); }
+                fprintf(出, "%s(&", 调);
+                值名(q->甲);
+                if (带参 && q->多量 > 0) {
+                    fputs(", ", 出);
+                    值名(q->多[0]);
+                }
+                fputs(");\n", 出);
+                return;
+            }
+        }
 
         /* 数字转文字。语义层的内置表早就登记了，后端一直没接——
          * 症状是写 `n.转字符串()` 直接报「后端还没实现方法」。
@@ -2328,12 +2610,27 @@ static void 写指令(中间函数 *f, 指令 *q)
     }
 
     case 指_关通道:
-        fprintf(出, "    ");
+        fprintf(出, "    简_关道(&");
         值名(q->甲);
-        fprintf(出, ".关 = 1; ");
-        值名(q->甲);
-        fprintf(出, ".n = 0;\n");
+        fprintf(出, ");\n");
         return;
+
+    case 指_起线程: {
+        中间函数 *g = 找函数(q->文, q->文长);
+        int 编[16];
+        int 数 = g ? 参数个数(g, 编) : 0;
+        char 标[192];
+        转义名(标, sizeof(标), q->文, q->文长);
+        fprintf(出, "    { 简包_%s *p = (简包_%s *)malloc(sizeof(简包_%s)); ", 标, 标, 标);
+        fprintf(出, "if (!p) { fputs(\"内存不够了\\n\", stderr); exit(3); } ");
+        for (int i = 0; i < 数 && i < q->多量; i++) {
+            fprintf(出, "p->a%d = ", i);
+            值名(q->多[i]);
+            fputs("; ", 出);
+        }
+        fprintf(出, "简_起(简入_%s, p); }\n", 标);
+        return;
+    }
 
     /* ---- 所有权标记 ----
      * 移动/复制/借用 在编译期已经检查完，运行时什么都不用做。
@@ -2632,6 +2929,65 @@ static void 写原型(中间函数 *f)
     fputs(");\n", 出);
 }
 
+/* 线程函数的 C 名字：和 写函数名 一样把 $ 换成 _，只是写到缓冲区里 */
+static void 转义名(char *缓, int 容, const char *名, int 长)
+{
+    int j = 0;
+    for (int i = 0; i < 长 && j < 容 - 1; i++)
+        缓[j++] = (名[i] == '$') ? '_' : 名[i];
+    缓[j] = 0;
+}
+
+/* `线程 { }` 抬出来的函数，签名和普通函数一样，参数是捕获到的变量。
+ * pthread_create 只认 `void *(*)(void *)`，所以每个线程函数都要配一个
+ * 包装：把参数从堆上的小结构体里取出来，按普通方式调用，再收尾。
+ *
+ * 参数各不相同（字符串是 16 字节结构体，整数是一个字），用 C 的 struct
+ * 让编译器自己算布局，比自己按偏移 memcpy 可靠得多。 */
+static void 写线程包装(void)
+{
+    const char *发过[64];
+    int 发过数 = 0;
+
+    for (中间函数 *f = 模块体.头; f; f = f->下) {
+        for (基本块 *b = f->首块; b; b = b->下) {
+            for (指令 *q = b->头; q; q = q->下) {
+                if (q->码 != 指_起线程) continue;
+
+                int 已发 = 0;
+                for (int i = 0; i < 发过数; i++)
+                    if (strlen(发过[i]) == (size_t)q->文长 &&
+                        memcmp(发过[i], q->文, (size_t)q->文长) == 0) 已发 = 1;
+                if (已发) continue;
+                if (发过数 < 64) 发过[发过数++] = q->文;
+
+                中间函数 *g = 找函数(q->文, q->文长);
+                if (!g) continue;
+                int 编[16];
+                int 数 = 参数个数(g, 编);
+                char 标[192];
+                转义名(标, sizeof(标), q->文, q->文长);
+
+                fprintf(出, "\ntypedef struct { ");
+                if (数 == 0) fputs("char 空位;", 出);
+                for (int i = 0; i < 数; i++)
+                    fprintf(出, "%s a%d; ", C型(值型(g, 编[i])), i);
+                fprintf(出, "} 简包_%s;\n", 标);
+
+                fprintf(出, "static void *简入_%s(void *p) {\n", 标);
+                fprintf(出, "    简包_%s *a = (简包_%s *)p;\n", 标, 标);
+                fprintf(出, "    ");
+                写函数名(q->文, q->文长);
+                fputc('(', 出);
+                for (int i = 0; i < 数; i++) fprintf(出, "%sa->a%d", i ? ", " : "", i);
+                fputs(");\n", 出);
+                fputs("    free(a);\n    return NULL;\n}\n", 出);
+            }
+        }
+    }
+    if (发过数) fputc('\n', 出);
+}
+
 static void 写函数(中间函数 *f)
 {
     int 参编[16]; int 参数 = 参数个数(f, 参编);
@@ -2741,6 +3097,8 @@ static void 生成C(节点 *根)
      * 没有原型 gcc 会当成隐式声明，参数类型全错。 */
     行("/* ---- 函数原型 ---- */");
     for (中间函数 *f = 模块体.头; f; f = f->下) 写原型(f);
+
+    写线程包装();
 
     for (中间函数 *f = 模块体.头; f; f = f->下) 写函数(f);
 

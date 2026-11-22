@@ -1024,5 +1024,93 @@ $ python3 教程/生成书.py
   <code>匹配</code>、<code>遍历</code>、<code>内置</code>、<code>函数值</code>、<code>引入</code>。
 </p>
 
+<h2>然后它真的并发起来了 <small>v0.15：三样一起补，顺序不能颠倒</small></h2>
+<p>
+  上一版最后写着"线程还是顺序执行"。这一版把它接上了，但没有先接线程——
+  先接的是<b>通道的锁</b>。顺序颠倒的话，前两样只会让程序偶发出错，比顺序执行更糟。
+</p>
+
+<div class="card" style="margin-top:18px">
+  <h3>三件事，一件压一件 <b>抬函数 → 跳板 → 互斥量</b></h3>
+  <table>
+    <tr><th>层</th><th>做了什么</th><th>不做的后果</th></tr>
+    <tr><td>IR</td><td><code>线程 { }</code> 抬成独立函数，形参 = 块内引用到的外层通道</td><td>后端要懂闭包环境，等于重写一遍作用域</td></tr>
+    <tr><td>后端</td><td><code>简包_*</code> 跳板把通道数组拆成实参，<code>pthread_create</code> + 统一 join</td><td>主线程先退，别的线程半句话都打印不完</td></tr>
+    <tr><td>运行时</td><td>通道配 mutex + 两个条件变量（有货 / 有空），<code>关闭</code> 两边都广播</td><td>发送方和接收方一起睡死</td></tr>
+  </table>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>最贵的一个坑 <b>锁不能跟着结构体一起走</b></h3>
+  <pre>通道[整数] 是值类型：传参、赋值、塞进结构体，做的都是拷贝。
+若 简道 里直接放 pthread_mutex_t —— 拷贝一份锁是未定义行为。
+   此刻能跑，换台机器就卡死，而且查不出来。
+
+错：typedef struct { pthread_mutex_t m; ... } 简道;
+对：typedef struct { 简锁 *锁; ... } 简道;      /* 锁在堆上，只有一份 */
+
+typedef struct {
+    pthread_mutex_t 互斥;
+    pthread_cond_t  有货;   /* 接收方等这个 */
+    pthread_cond_t  有空;   /* 发送方等这个 */
+} 简锁;</pre>
+  <div style="padding:14px 18px;border-top:1px solid var(--line);color:#8b94a1;font-size:13px;line-height:1.7">
+    两个条件变量缺一不可。只有一个的话，"满了"和"空了"会互相叫醒对方不该醒的那一半。
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>顺手修掉的老 bug <b><code>1~3</code> 只跑两个</b></h3>
+  <pre>范围循环降 IR 时用了 指_小于，于是 对 i: 1~3 跑 1、2。
+规范写的是闭区间。为什么一直没被发现：
+测试里全是 对 i: 0~n-1 的惯用写法，少一轮正好看不出来。
+现在改 指_小于等于，匹配里的范围分支一并改。</pre>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>现在能这么写 <b>两个工人抢四件活</b></h3>
+  <pre>函数 工人(活: 通道[整数], 果: 通道[字符串]) -&gt; 整数 {
+    循环 {
+        私有 可空[整数] 件 = 接收 活
+        如果 件.有值 就 {
+            发送 果, 字符串(件.取值()) .. " → " .. 字符串(件.取值() * 2)
+        } 否则 { 返回 0 }
+    }
+}
+
+线程 { 工人(活, 果) }
+线程 { 工人(活, 果) }
+对 i: 1~4 { 发送 活, i }
+关闭 活</pre>
+  <p style="margin:12px 0 0;color:#6b7480;font-size:13px">
+    线程内只能<b>读</b>外层变量，写会在编译期被拦下。想改共享状态就发消息回去——
+    数据竞争挡在编译期，代价是思路要从"改变量"换成"传消息"。
+  </p>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>顺手把网络也接上了 <b>两个句柄 + 一个函数</b></h3>
+  <pre>监听("0.0.0.0", 0)      → 结果[监听器, 字符串]   端口给 0 让内核挑
+监听器.接受()            → 结果[套接字, 字符串]
+套接字.读(n) / 读全部() / 写(s) / 对端() / 关闭()
+HTTP取(url)             → 字符串（只支持 http://，不跟重定向、不解 chunked）</pre>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>还没做的 <b>原生后端只有整数</b></h3>
+  <pre>简汇编.c 现在只认整数、字符串和拼接。浮点直接拒绝：</pre>
+  <pre style="border-top:1px solid var(--line)">$ ./后端/简编译 fp.jy -n
+原生后端还不支持：这种常量类型
+  函数：主
+  指令：常量</pre>
+  <p style="margin:12px 0 0;color:#6b7480;font-size:13px">
+    拒绝比算错好。下一步是浮点走 SSE、容器自己实现，最后把 as / ld 也甩掉，自己出 ELF。
+  </p>
+</div>
+
+<p style="margin-top:22px">
+  测试从 25 个涨到 <strong>27 个</strong>，新增的两个正好钉住这一轮：<code>并发</code>、<code>网络</code>。
+</p>
+
 </body>
 </html>
