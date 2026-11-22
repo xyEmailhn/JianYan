@@ -18,7 +18,7 @@ ZIG = $(shell command -v zig 2>/dev/null || ls /usr/local/lib/python3*/dist-pack
 
 all: 简编译 图库
 
-简编译: 简编译.c 简汇编.c ../中间/ir.c ../语义/sema.c ../语法/parser.c ../词法/lexer.c
+简编译: 简编译.c 简汇编.c 简出.c ../中间/ir.c ../语义/sema.c ../语法/parser.c ../词法/lexer.c
 	$(CC) $(快) -s -o $@ 简编译.c -lm
 
 最小: 简编译.c

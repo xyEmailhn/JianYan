@@ -80,6 +80,30 @@ static unsigned char *汇_解串(const char *s, int n, int *出长)
     return p;
 }
 
+/* ---- 浮点常量池 ----
+ * 按位比较：-0.0 和 0.0 数值相等但位不同，混用会把 -0.0 打印成 0。 */
+static double 汇_浮值[汇_最多串];
+static int 汇_浮数 = 0;
+
+static int 汇_浮号(double v)
+{
+    for (int i = 0; i < 汇_浮数; i++)
+        if (memcmp(&汇_浮值[i], &v, sizeof(double)) == 0) return i;
+    if (汇_浮数 >= 汇_最多串) return 0;
+    汇_浮值[汇_浮数] = v;
+    return 汇_浮数++;
+}
+
+static double 汇_浮文(const char *s, int n)
+{
+    char b[80];
+    int m = n > 0 && n < 79 ? n : 0;
+    if (!m) return 0.0;
+    memcpy(b, s, (size_t)m);
+    b[m] = 0;
+    return strtod(b, NULL);
+}
+
 static int 汇_串号(const char *文, int 长)
 {
     int 实长 = 0;
@@ -162,6 +186,24 @@ static void 写运行时汇编(void)
 "    leave\n"
 "    ret\n"
 "\n"
+"/* 简_字数(rdi=字节, rsi=长) → rax = 字符数：数非续字节 */\n"
+"简_字数:\n"
+"    xorq %rax, %rax\n"
+"    xorq %rcx, %rcx\n"
+".Lcnt_loop:\n"
+"    cmpq %rsi, %rcx\n"
+"    jge .Lcnt_done\n"
+"    movb (%rdi,%rcx), %dl\n"
+"    andb $0xc0, %dl\n"
+"    cmpb $0x80, %dl\n"
+"    je .Lcnt_next\n"
+"    incq %rax\n"
+".Lcnt_next:\n"
+"    incq %rcx\n"
+"    jmp .Lcnt_loop\n"
+".Lcnt_done:\n"
+"    ret\n"
+"\n"
 "简_换行:\n"
 "    leaq .Lnl(%rip), %rdi\n"
 "    movq $1, %rsi\n"
@@ -242,8 +284,240 @@ static void 写运行时汇编(void)
 "    leave\n"
 "    ret\n"
 "\n"
+"/* ---- 简_打浮：xmm0 里的 double，按 %g 的样子写出来 ----\n"
+" * 6 位有效数字、去尾零；指数 < -4 或 >= 6 走科学计数法。\n"
+" * 只用 SSE 和整数除法，不碰 libc。 */\n"
+"简_打浮:\n"
+"    pushq %rbp\n"
+"    movq %rsp, %rbp\n"
+"    pushq %rbx\n"
+"    pushq %r12\n"
+"    pushq %r13\n"
+"    pushq %r14\n"
+"    subq $128, %rsp\n"
+"    leaq -33(%rbp), %rbx\n"
+"    leaq -160(%rbp), %r12\n"
+"    movq %xmm0, %rax\n"
+"    shrq $63, %rax\n"
+"    movq %rax, %r13\n"
+"    testq %r13, %r13\n"
+"    jz .Lpf_pos\n"
+"    movq %xmm0, %rax\n"
+"    btrq $63, %rax\n"
+"    movq %rax, %xmm0\n"
+".Lpf_pos:\n"
+"    xorpd %xmm1, %xmm1\n"
+"    ucomisd %xmm1, %xmm0\n"
+"    jne .Lpf_nz\n"
+"    movb $48, -34(%rbp)\n"
+"    leaq -34(%rbp), %rbx\n"
+"    jmp .Lpf_emit\n"
+".Lpf_nz:\n"
+"    xorl %r9d, %r9d\n"
+"    movsd .LCF十(%rip), %xmm2\n"
+".Lpf_big:\n"
+"    ucomisd %xmm2, %xmm0\n"
+"    jb .Lpf_small\n"
+"    divsd %xmm2, %xmm0\n"
+"    incq %r9\n"
+"    jmp .Lpf_big\n"
+".Lpf_small:\n"
+"    movsd .LCF一(%rip), %xmm2\n"
+".Lpf_sm2:\n"
+"    ucomisd %xmm2, %xmm0\n"
+"    jae .Lpf_norm\n"
+"    movsd .LCF十(%rip), %xmm3\n"
+"    mulsd %xmm3, %xmm0\n"
+"    decq %r9\n"
+"    jmp .Lpf_sm2\n"
+".Lpf_norm:\n"
+"    movsd .LCF十万(%rip), %xmm2\n"
+"    mulsd %xmm2, %xmm0\n"
+"    cvtsd2si %xmm0, %rax\n"
+"    cmpq $1000000, %rax\n"
+"    jl .Lpf_dok\n"
+"    movq $100000, %rax\n"
+"    incq %r9\n"
+".Lpf_dok:\n"
+"    movl $5, %ecx\n"
+"    movq $10, %r8\n"
+".Lpf_dig:\n"
+"    xorq %rdx, %rdx\n"
+"    divq %r8\n"
+"    addb $48, %dl\n"
+"    movb %dl, (%r12,%rcx)\n"
+"    decq %rcx\n"
+"    jns .Lpf_dig\n"
+"    cmpq $-4, %r9\n"
+"    jl .Lpf_exp\n"
+"    cmpq $6, %r9\n"
+"    jge .Lpf_exp\n"
+"    cmpq $0, %r9\n"
+"    jl .Lpf_nege\n"
+"    movq $5, %r10\n"
+".Lpf_a1:\n"
+"    cmpq %r9, %r10\n"
+"    jle .Lpf_a2\n"
+"    cmpb $48, (%r12,%r10)\n"
+"    jne .Lpf_a2\n"
+"    decq %r10\n"
+"    jmp .Lpf_a1\n"
+/* 缓冲是往前长的，所以最后写的那个字符在最左边。
+ * 先把小数写完、再写小数点、最后写整数部分——顺序反了就成了 25.3。 */
+".Lpf_a2:\n"
+"    cmpq %r9, %r10\n"
+"    jle .Lpf_a3\n"
+"    movq %r10, %rcx\n"
+".Lpf_a4:\n"
+"    movb (%r12,%rcx), %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    decq %rcx\n"
+"    cmpq %r9, %rcx\n"
+"    jg .Lpf_a4\n"
+"    movb $46, %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+".Lpf_a3:\n"
+"    movq %r9, %rcx\n"
+".Lpf_a5:\n"
+"    movb (%r12,%rcx), %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    decq %rcx\n"
+"    jns .Lpf_a5\n"
+"    jmp .Lpf_emit\n"
+".Lpf_nege:\n"
+"    movq $5, %r10\n"
+".Lpf_b1:\n"
+"    cmpb $48, (%r12,%r10)\n"
+"    jne .Lpf_b2\n"
+"    decq %r10\n"
+"    jns .Lpf_b1\n"
+".Lpf_b2:\n"
+"    movq %r10, %rcx\n"
+".Lpf_b3:\n"
+"    movb (%r12,%rcx), %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    decq %rcx\n"
+"    jns .Lpf_b3\n"
+"    movq %r9, %rcx\n"
+"    negq %rcx\n"
+"    decq %rcx\n"
+".Lpf_b4:\n"
+"    testq %rcx, %rcx\n"
+"    jle .Lpf_b5\n"
+"    movb $48, %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    decq %rcx\n"
+"    jmp .Lpf_b4\n"
+".Lpf_b5:\n"
+"    movb $46, %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    movb $48, %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    jmp .Lpf_emit\n"
+".Lpf_exp:\n"
+"    movq $5, %r10\n"
+".Lpf_c1:\n"
+"    cmpb $48, (%r12,%r10)\n"
+"    jne .Lpf_c2\n"
+"    decq %r10\n"
+"    jns .Lpf_c1\n"
+/* 指数形式：先写指数（贴着右边），再 'e'、'.'、尾数，
+ * 最后写的尾数落在最左边。 */
+".Lpf_c2:\n"
+"    movq %r9, %r11\n"
+"    testq %r11, %r11\n"
+"    jns .Lpf_c6\n"
+"    negq %r11\n"
+".Lpf_c6:\n"
+"    movq %r11, %rax\n"
+"    movq $10, %r8\n"
+"    xorq %rdx, %rdx\n"
+"    divq %r8\n"
+"    addb $48, %dl\n"
+"    decq %rbx\n"
+"    movb %dl, (%rbx)\n"
+"    movq %rax, %rcx\n"
+"    testq %rcx, %rcx\n"
+"    jnz .Lpf_c7\n"
+"    movb $48, %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    jmp .Lpf_c8\n"
+".Lpf_c7:\n"
+"    xorq %rdx, %rdx\n"
+"    movq %rcx, %rax\n"
+"    divq %r8\n"
+"    addb $48, %dl\n"
+"    decq %rbx\n"
+"    movb %dl, (%rbx)\n"
+"    movq %rax, %rcx\n"
+"    testq %rcx, %rcx\n"
+"    jnz .Lpf_c7\n"
+".Lpf_c8:\n"
+"    testq %r9, %r9\n"
+"    jns .Lpf_c9\n"
+"    movb $45, %al\n"
+"    jmp .Lpf_c10\n"
+".Lpf_c9:\n"
+"    movb $43, %al\n"
+".Lpf_c10:\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    movb $101, %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+/* 小数点在首位数之后：先写 dig[r10..1]，再 '.'，最后 dig[0]。
+ * 反过来的话，'.' 会被顶到最左边，变成 123457.e+06。 */
+"    cmpq $0, %r10\n"
+"    jle .Lpf_c13\n"
+"    movq %r10, %rcx\n"
+".Lpf_c12:\n"
+"    movb (%r12,%rcx), %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    decq %rcx\n"
+"    cmpq $0, %rcx\n"
+"    jg .Lpf_c12\n"
+"    movb $46, %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+".Lpf_c13:\n"
+"    movb (%r12), %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+"    jmp .Lpf_emit\n"
+".Lpf_emit:\n"
+"    testq %r13, %r13\n"
+"    jz .Lpf_go\n"
+"    movb $45, %al\n"
+"    decq %rbx\n"
+"    movb %al, (%rbx)\n"
+".Lpf_go:\n"
+"    movq %rbx, %rdi\n"
+"    leaq -33(%rbp), %rsi\n"
+"    subq %rbx, %rsi\n"
+"    call 简_写\n"
+"    addq $128, %rsp\n"
+"    popq %r14\n"
+"    popq %r13\n"
+"    popq %r12\n"
+"    popq %rbx\n"
+"    leave\n"
+"    ret\n"
+"\n"
 "    .section .rodata\n"
 ".Lnl: .byte 10\n"
+"    .align 8\n"
+".LCF一: .quad 0x3ff0000000000000\n"
+".LCF十: .quad 0x4024000000000000\n"
+".LCF十万: .quad 0x40f86a0000000000\n"
 "\n"
 "/* 堆的两个游标。放 .bss：不占文件大小，加载时是 0 */\n"
 "    .bss\n"
@@ -482,6 +756,9 @@ static void 汇_算区间(void)
     for (int v = 0; v < 值数; v++) {
         if (s->区止[v] < 0) { s->区起[v] = 0; s->区止[v] = -1; }   /* 没人用 */
         if (s->区起[v] > s->区止[v]) s->区起[v] = s->区止[v];
+        /* 浮点值不分配通用寄存器：空区间，分配器自然跳过它 */
+        类型 *t = 值型(s->f, v);
+        if (t && t->种 == 型_浮点) { s->区起[v] = 0x7fffffff; s->区止[v] = -1; }
     }
 }
 
@@ -609,6 +886,7 @@ static int 汇_速常(int v, long long *出值)
     if (!汇_是常(v)) return 0;
     指令 *q = 汇_态.定义[v];
     if (!q || !q->文) return 0;
+    if (!q->型 || q->型->种 == 型_浮点) return 0;
     if (q->型->种 == 型_布尔) { *出值 = (q->文长 == 3 && memcmp(q->文, "真", 3) == 0); return 1; }
     char buf[64];
     int n = q->文长 < 63 ? q->文长 : 63;
@@ -932,6 +1210,100 @@ static int 汇_幻数(long long d, unsigned long long *出M, int *出S)
 }
 
 /* ---- 一条指令 ---- */
+/* ---- 浮点 ----
+ * 浮点值不参与通用寄存器分配（寄[v] 保持 -1），一律躺在家槽里。
+ * 一条浮点指令就是「从槽读、算、写回槽」：多两次访存，换来的是不用再写
+ * 一套 xmm 的活跃分析与溢出策略。先把浮点算对，速度是下一步的事。
+ *
+ * 也不碰 xmm 以外的约定：实参还是走 rdi/rsi...，浮点形参暂时不收。 */
+static int 汇_是浮(中间函数 *f, int v)
+{
+    类型 *t = 值型(f, v);
+    return t && t->种 == 型_浮点;
+}
+
+/* 整数结果要落到分配器指定的地方：有寄存器就写寄存器，否则写家槽。
+ * 浮点比较、浮点转整数都会产生整数——只写槽的话，后面按寄存器读就是垃圾。 */
+static void 汇_落整数(int v, const char *r)
+{
+    if (v >= 0 && v < 汇_态.值数 && 汇_态.寄[v] >= 0)
+        fprintf(出, "    movq %s, %s\n", r, 汇_寄名[汇_态.寄[v]]);
+    else
+        fprintf(出, "    movq %s, %d(%%rbp)\n", r, 汇_槽(v));
+}
+
+static int 汇_浮点单条(中间函数 *f, 指令 *q)
+{
+    int 果 = q->结果, 甲 = q->甲, 乙 = q->乙;
+
+    switch (q->码) {
+    case 指_常量:
+        if (q->型 && q->型->种 == 型_浮点) {
+            int 号 = 汇_浮号(汇_浮文(q->文, q->文长));
+            fprintf(出, "    movsd .LCF%d(%%rip), %%xmm0\n", 号);
+            fprintf(出, "    movsd %%xmm0, %d(%%rbp)\n", 汇_槽(果));
+            return 1;
+        }
+        return 0;
+
+    case 指_加: case 指_减: case 指_乘: case 指_除: {
+        if (!汇_是浮(f, 甲) && !汇_是浮(f, 乙)) return 0;
+        const char *op = q->码 == 指_加 ? "addsd" : q->码 == 指_减 ? "subsd"
+                       : q->码 == 指_乘 ? "mulsd" : "divsd";
+        fprintf(出, "    movsd %d(%%rbp), %%xmm0\n", 汇_槽(甲));
+        fprintf(出, "    %s %d(%%rbp), %%xmm0\n", op, 汇_槽(乙));
+        fprintf(出, "    movsd %%xmm0, %d(%%rbp)\n", 汇_槽(果));
+        return 1;
+    }
+
+    case 指_等于: case 指_不等: case 指_小于: case 指_大于:
+    case 指_小于等: case 指_大于等: {
+        if (!汇_是浮(f, 甲) && !汇_是浮(f, 乙)) return 0;
+        /* ucomisd 的 CF 表示「第一个操作数小于第二个」：无序数（NaN）下 CF=1，
+         * 所以 <、<= 对 NaN 会给真——和 C 的 < 不一样。这一版不处理 NaN。 */
+        const char *cc = q->码 == 指_等于 ? "sete" : q->码 == 指_不等 ? "setne"
+                       : q->码 == 指_小于 ? "setb" : q->码 == 指_大于 ? "seta"
+                       : q->码 == 指_小于等 ? "setbe" : "setae";
+        fprintf(出, "    movsd %d(%%rbp), %%xmm0\n", 汇_槽(甲));
+        fprintf(出, "    ucomisd %d(%%rbp), %%xmm0\n", 汇_槽(乙));
+        fprintf(出, "    %s %%al\n", cc);
+        fputs("    movzbq %al, %rax\n", 出);
+        汇_落整数(果, "%rax");
+        return 1;
+    }
+
+    case 指_负:
+        if (!汇_是浮(f, 甲)) return 0;
+        /* 是「翻转」不是「清掉」：btr 会得到绝对值，-1.5 还是 1.5。 */
+        fprintf(出, "    movq %d(%%rbp), %%rax\n", 汇_槽(甲));
+        fputs("    btcq $63, %rax\n", 出);
+        fprintf(出, "    movq %%rax, %d(%%rbp)\n", 汇_槽(果));
+        return 1;
+
+    case 指_转换: {
+        类型 *到 = q->型, *从 = 值型(f, 甲);
+        if (!到 || !从) return 0;
+        if (到->种 == 型_浮点 && 从->种 == 型_浮点) { 汇_搬值(f, 甲, 果); return 1; }
+        if (到->种 == 型_浮点 && (从->种 == 型_整数 || 从->种 == 型_布尔)) {
+            /* 整数常量不落槽，得让它先变成一个真实的寄存器 */
+            const char *r = 汇_取(甲);
+            fprintf(出, "    cvtsi2sd %s, %%xmm0\n", r);
+            fprintf(出, "    movsd %%xmm0, %d(%%rbp)\n", 汇_槽(果));
+            return 1;
+        }
+        if (到->种 == 型_整数 && 从->种 == 型_浮点) {
+            fprintf(出, "    cvttsd2si %d(%%rbp), %%rax\n", 汇_槽(甲));
+            汇_落整数(果, "%rax");
+            return 1;
+        }
+        return 0;
+    }
+
+    default:
+        return 0;
+    }
+}
+
 static void 汇_单条(中间函数 *f, int 序, 指令 *q, int idx)
 {
     int 果 = q->结果, 甲 = q->甲, 乙 = q->乙;
@@ -940,6 +1312,9 @@ static void 汇_单条(中间函数 *f, int 序, 指令 *q, int idx)
     if (果 >= 0 && 果 < 汇_态.值数 && 汇_态.用次[果] == 0 && 汇_纯(q->码)) return;
 
     汇_池清();
+
+    /* 浮点先走一边：它只碰家槽和 xmm，不该跟整数路径混在一起 */
+    if (汇_浮点单条(f, q)) return;
 
     switch (q->码) {
 
@@ -1081,10 +1456,14 @@ static void 汇_单条(中间函数 *f, int 序, 指令 *q, int idx)
         int 有魔 = 汇_常整(乙, &d) && d >= 2 && 汇_幻数(d, &M, &S);
 
         if (有魔) {
-            /* 甲的来源要么是分配到的寄存器，要么是家槽——两处都不受
-             * rax/rcx/rdx 这套临时影响，所以可以安全地读第二遍。 */
+            /* 甲的来源有三种：立即数常量、分配到的寄存器、家槽。
+             * 常量那条不能漏——整数常量不落槽，槽里是上一轮函数留下的垃圾。 */
             int 甲寄 = (甲 >= 0 && 汇_态.寄[甲] >= 0);
-            if (甲寄) {
+            long long 甲常值 = 0;
+            int 甲常 = 汇_速常(甲, &甲常值);
+            if (甲常) {
+                fprintf(出, "    movq $%lld, %%rax\n", 甲常值);
+            } else if (甲寄) {
                 const char *a = 汇_寄名[汇_态.寄[甲]];
                 if (strcmp(a, "%rax") != 0) fprintf(出, "    movq %s, %%rax\n", a);
             } else {
@@ -1120,7 +1499,8 @@ static void 汇_单条(中间函数 *f, int 序, 指令 *q, int idx)
                     fprintf(出, "    movabsq $%lld, %%rcx\n", d);
                     fputs("    imulq %rcx, %rdx\n", 出);
                 }
-                if (甲寄) fprintf(出, "    movq %s, %%rax\n", 汇_寄名[汇_态.寄[甲]]);
+                if (甲常) fprintf(出, "    movq $%lld, %%rax\n", 甲常值);
+                else if (甲寄) fprintf(出, "    movq %s, %%rax\n", 汇_寄名[汇_态.寄[甲]]);
                 else fprintf(出, "    movq %d(%%rbp), %%rax\n", 汇_槽(甲));
                 fputs("    subq %rdx, %rax\n", 出);
                 if (汇_态.寄[果] >= 0) fprintf(出, "    movq %%rax, %s\n", 汇_寄名[汇_态.寄[果]]);
@@ -1213,7 +1593,22 @@ static void 汇_单条(中间函数 *f, int 序, 指令 *q, int idx)
         return;
     }
 
-    case 指_长度:
+    case 指_长度: {
+        /* 字符串的 # 是字符数（UTF-8 一个汉字算一个），不是字节数。
+         * 组的 # 是元素个数、映射的 # 是键数，那些照旧读第二个字。 */
+        类型 *t = 值型(f, 甲);
+        if (t && t->种 == 型_字符串) {
+            /* 调一次运行时，caller-saved 里的活值得先收起来 */
+            汇_存跨(idx);
+            if (汇_态.寄[甲] >= 0)
+                fprintf(出, "    movq %s, %d(%%rbp)\n", 汇_寄名[汇_态.寄[甲]], 汇_槽(甲));
+            fprintf(出, "    movq %d(%%rbp), %%rdi\n", 汇_槽(甲));
+            fprintf(出, "    movq %d(%%rbp), %%rsi\n", 汇_槽(甲) + 8);
+            fputs("    call 简_字数\n", 出);
+            汇_取跨(idx);
+            汇_落整数(果, "%rax");
+            return;
+        }
         if (汇_态.寄[果] >= 0)
             fprintf(出, "    movq %d(%%rbp), %s\n", 汇_槽(甲) + 8, 汇_寄名[汇_态.寄[果]]);
         else {
@@ -1221,6 +1616,7 @@ static void 汇_单条(中间函数 *f, int 序, 指令 *q, int idx)
             fprintf(出, "    movq %%rax, %d(%%rbp)\n", 汇_槽(果));
         }
         return;
+    }
 
     case 指_拼接: {
         汇_存跨(idx);
@@ -1329,6 +1725,11 @@ static void 汇_单条(中间函数 *f, int 序, 指令 *q, int idx)
                     汇_进(v, "%rdi");
                     fprintf(出, "    movq %d(%%rbp), %%rsi\n", 汇_槽(v) + 8);
                     fputs("    call 简_写\n", 出);
+                    汇_取跨(idx);
+                } else if (t && t->种 == 型_浮点) {
+                    汇_存跨(idx);
+                    fprintf(出, "    movsd %d(%%rbp), %%xmm0\n", 汇_槽(v));
+                    fputs("    call 简_打浮\n", 出);
                     汇_取跨(idx);
                 } else if (t && t->种 == 型_布尔) {
                     long long kk;
@@ -1701,6 +2102,12 @@ static void 写串池汇编(void)
     fputs("\n    .section .rodata\n", 出);
     fputs(".LTRUE:  .byte 231,156,159\n", 出);   /* 真 */
     fputs(".LFALSE: .byte 229,129,135\n", 出);   /* 假 */
+    if (汇_浮数) fputs("    .align 8\n", 出);
+    for (int i = 0; i < 汇_浮数; i++) {
+        unsigned long long u;
+        memcpy(&u, &汇_浮值[i], sizeof(double));
+        fprintf(出, ".LCF%d: .quad 0x%llx\n", i, u);
+    }
     for (int i = 0; i < 汇_串数; i++) {
         fprintf(出, ".LSTR%d:\n    .byte ", i);
         if (汇_串[i].长 == 0) { fputs("0", 出); }
@@ -1727,8 +2134,10 @@ static int 汇_汇编(节点 *根)
         中间函数 *f = 汇_函[i];
         for (基本块 *b = f->首块; b; b = b->下)
             for (指令 *q = b->头; q; q = q->下)
-                if (q->码 == 指_常量 && q->型 && q->型->种 == 型_字符串 && q->文)
-                    汇_串号(q->文, q->文长);
+                if (q->码 == 指_常量 && q->型 && q->文) {
+                    if (q->型->种 == 型_字符串) 汇_串号(q->文, q->文长);
+                    else if (q->型->种 == 型_浮点) 汇_浮号(汇_浮文(q->文, q->文长));
+                }
     }
 
     fputs("/* ============================================================\n"

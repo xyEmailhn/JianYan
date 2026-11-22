@@ -1112,5 +1112,82 @@ HTTP取(url)             → 字符串（只支持 http://，不跟重定向、�
   测试从 25 个涨到 <strong>27 个</strong>，新增的两个正好钉住这一轮：<code>并发</code>、<code>网络</code>。
 </p>
 
+<h2>然后它把最后两步也拿回来了 <small>v0.16：自己的汇编器、自己的 ELF、浮点</small></h2>
+<p>
+  v0.11 说"甩掉了 gcc"，但收尾还交给 <code>as</code> 和 <code>ld</code>。
+  这一版把这两步也自己做了，顺带补上原生后端一直空着的浮点。
+</p>
+
+<div class="card" style="margin-top:18px">
+  <h3>流水线少了两节 <b>IR → 汇编 → 编码 → ELF</b></h3>
+  <table>
+    <tr><th>步骤</th><th>以前</th><th>现在</th></tr>
+    <tr><td>寄存器分配 / 指令选择</td><td>简汇编.c</td><td>简汇编.c（一行没改）</td></tr>
+    <tr><td>汇编 → 机器码</td><td><code>as</code></td><td>简出（40 个助记符的编码表）</td></tr>
+    <tr><td>目标文件 → 可执行</td><td><code>ld</code></td><td>简出（两个程序头，R+X 加 R+W）</td></tr>
+  </table>
+  <p style="margin:12px 0 0;color:#6b7480;font-size:13px">
+    产物反而小了：<code>as+ld</code> 9472 字节，自己出 <b>4096 字节</b>——
+    <code>ld</code> 要写节头、每条指令按 64 字节对齐，我们只写两个程序头。
+  </p>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>一个只在负数除法上错的 bug <b>strtoll 会饱和</b></h3>
+  <pre>movabsq $12297829382473034411, %rdx     ← 常数除法的魔数，0xAAAAAAAAAAAAAAAB
+                 ↓ strtoll 解析
+            0x7fffffffffffffff              ← 在 LLONG_MAX 处饱和，不报错
+
+12 条 movabsq 全中招。商和是对的，余和差一千多——因为只有取余那条
+路径会重读原值。改用 strtoull 再强转。</pre>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>浮点 <b>不进寄存器分配</b></h3>
+  <pre>x = a * b
+  movsd  槽 a, %xmm0        ← 从家槽读
+  mulsd  槽 b, %xmm0
+  movsd  %xmm0, 槽 x        ← 写回家槽
+
+浮点值一律躺在家槽里，xmm0/xmm2 当手边临时。
+多两次访存，换来的是不必再写一套 xmm 的活跃分析与溢出策略。
+先把浮点算对，速度是下一步的事。</pre>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>打印浮点 <b>和 printf("%g") 一个字都不差</b></h3>
+  <p style="margin:0 0 12px;color:#6b7480;font-size:13px">
+    6 位有效数字、去尾零、指数 &lt; -4 或 &gt;= 6 走科学计数法。缓冲区向前生长，
+    <b>最后写的字符在最左边</b>——这句话理解错了三次：
+  </p>
+  <table>
+    <tr><th>期望</th><th>实际</th><th>错在哪</th></tr>
+    <tr><td><code>-3.25</code></td><td><code>-25.3</code></td><td>先写整数再写小数，反了</td></tr>
+    <tr><td><code>1.23457e+06</code></td><td><code>06+e.123457</code></td><td>指数形式整段反着写</td></tr>
+    <tr><td><code>1.23457e+06</code></td><td><code>123457.e+06</code></td><td>小数点应在首位数之后</td></tr>
+  </table>
+  <p style="margin:12px 0 0;color:#6b7480;font-size:13px">
+    还死循环过一次：规格化时"乘 10 往上抬"的乘数写成了 1.0，<code>0.1</code> 永远小于 1。
+  </p>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>接上浮点之后，翻出三个老 bug <b>都不是新写的</b></h3>
+  <pre>① 整数常量除法的槽是空的
+   17 // 5 → 0。魔数除法直接读槽，而整数常量根本不落槽，读到上一轮的残留。
+
+② #字符串 返回字节数
+   #"简言" → 6，规范说 2。补了 简_字数，数"非续字节"。
+
+③ 浮点比较、浮点转整数只写槽不写寄存器
+   这两条产生的是整数结果，会被分配器指派一个通用寄存器。
+   整数(甲 * 4.0) 输出 4196865 —— 一个不像任何东西的数。</pre>
+</div>
+
+<p style="margin-top:22px">
+  测试 <strong>28 个</strong>，原生后端从覆盖 5 个用例涨到 <strong>8 个</strong>。
+  还没做的：组和映射还是 C 后端专属，原生后端见到它们仍然明确拒绝。
+</p>
+
 </body>
 </html>

@@ -3164,6 +3164,11 @@ static const char *找图库(void)
 /* 原生后端：IR → x86-64 汇编 → as → ld。放在这里是要晚于 参数个数 / 找函数。 */
 #include "简汇编.c"
 
+/* 自己的汇编器 + 链接器。内嵌进来，`-n` 走它就不再需要 as 和 ld。
+   两个 main 不能同时存在，所以 简出.c 用 简出_内嵌 把 main 关掉。 */
+#define 简出_内嵌 1
+#include "简出.c"
+
 static void 用法(void)
 {
     fputs(
@@ -3172,7 +3177,8 @@ static void 用法(void)
         "  简编译 文件.jy -o 名字      生成指定名字\n"
         "  简编译 文件.jy -c           只出 C 代码（stdout）\n"
         "  简编译 文件.jy -c 文件.c    只出 C 代码（写文件）\n"
-        "  简编译 文件.jy -n           走原生后端：IR → 汇编 → as → ld，不经过 C\n"
+        "  简编译 文件.jy -n           走原生后端：IR → 汇编 → 自己出 ELF（不碰 as / ld / gcc）\n"
+        "  简编译 文件.jy -n --as      原生后端的老路：汇编交给 as，链接交给 ld（对拍用）\n"
         "  简编译 文件.jy -S 文件.s    只出汇编（原生后端）\n",
         stderr);
 }
@@ -3250,6 +3256,7 @@ int main(int argc, char **argv)
     const char *C文件 = NULL;
     int 只要C = 0;
     int 原生 = 0;
+    int 走as = 0;
     const char *汇编文件 = NULL;
     int 只要汇编 = 0;
 
@@ -3260,6 +3267,7 @@ int main(int argc, char **argv)
             if (i + 1 < argc && argv[i + 1][0] != '-') C文件 = argv[++i];
         }
         else if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--原生") == 0) 原生 = 1;
+        else if (strcmp(argv[i], "--as") == 0) { 原生 = 1; 走as = 1; }
         else if (strcmp(argv[i], "-S") == 0) {
             原生 = 1; 只要汇编 = 1;
             if (i + 1 < argc && argv[i + 1][0] != '-') 汇编文件 = argv[++i];
@@ -3313,6 +3321,16 @@ int main(int argc, char **argv)
         int 好 = 汇_汇编(根);
         fclose(出);
         if (!好) { remove(s路径); return 1; }
+
+        /* 默认：自己的汇编器 + 自己的 ELF 写出。as 和 ld 一个都不碰。 */
+        if (!走as) {
+            if (简出(s路径, 输出) != 0) {
+                fprintf(stderr, "自出 ELF 失败。汇编留着，自己看：%s\n", s路径);
+                return 1;
+            }
+            remove(s路径);
+            return 0;
+        }
 
         char 命令[2048];
         snprintf(命令, sizeof(命令), "as -o '%s' '%s' 2>&1", o路径, s路径);
