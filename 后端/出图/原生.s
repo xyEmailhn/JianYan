@@ -56,6 +56,24 @@
     leave
     ret
 
+/* 简_字数(rdi=字节, rsi=长) → rax = 字符数：数非续字节 */
+简_字数:
+    xorq %rax, %rax
+    xorq %rcx, %rcx
+.Lcnt_loop:
+    cmpq %rsi, %rcx
+    jge .Lcnt_done
+    movb (%rdi,%rcx), %dl
+    andb $0xc0, %dl
+    cmpb $0x80, %dl
+    je .Lcnt_next
+    incq %rax
+.Lcnt_next:
+    incq %rcx
+    jmp .Lcnt_loop
+.Lcnt_done:
+    ret
+
 简_换行:
     leaq .Lnl(%rip), %rdi
     movq $1, %rsi
@@ -136,8 +154,234 @@
     leave
     ret
 
+/* ---- 简_打浮：xmm0 里的 double，按 %g 的样子写出来 ----
+ * 6 位有效数字、去尾零；指数 < -4 或 >= 6 走科学计数法。
+ * 只用 SSE 和整数除法，不碰 libc。 */
+简_打浮:
+    pushq %rbp
+    movq %rsp, %rbp
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    subq $128, %rsp
+    leaq -33(%rbp), %rbx
+    leaq -160(%rbp), %r12
+    movq %xmm0, %rax
+    shrq $63, %rax
+    movq %rax, %r13
+    testq %r13, %r13
+    jz .Lpf_pos
+    movq %xmm0, %rax
+    btrq $63, %rax
+    movq %rax, %xmm0
+.Lpf_pos:
+    xorpd %xmm1, %xmm1
+    ucomisd %xmm1, %xmm0
+    jne .Lpf_nz
+    movb $48, -34(%rbp)
+    leaq -34(%rbp), %rbx
+    jmp .Lpf_emit
+.Lpf_nz:
+    xorl %r9d, %r9d
+    movsd .LCF十(%rip), %xmm2
+.Lpf_big:
+    ucomisd %xmm2, %xmm0
+    jb .Lpf_small
+    divsd %xmm2, %xmm0
+    incq %r9
+    jmp .Lpf_big
+.Lpf_small:
+    movsd .LCF一(%rip), %xmm2
+.Lpf_sm2:
+    ucomisd %xmm2, %xmm0
+    jae .Lpf_norm
+    movsd .LCF十(%rip), %xmm3
+    mulsd %xmm3, %xmm0
+    decq %r9
+    jmp .Lpf_sm2
+.Lpf_norm:
+    movsd .LCF十万(%rip), %xmm2
+    mulsd %xmm2, %xmm0
+    cvtsd2si %xmm0, %rax
+    cmpq $1000000, %rax
+    jl .Lpf_dok
+    movq $100000, %rax
+    incq %r9
+.Lpf_dok:
+    movl $5, %ecx
+    movq $10, %r8
+.Lpf_dig:
+    xorq %rdx, %rdx
+    divq %r8
+    addb $48, %dl
+    movb %dl, (%r12,%rcx)
+    decq %rcx
+    jns .Lpf_dig
+    cmpq $-4, %r9
+    jl .Lpf_exp
+    cmpq $6, %r9
+    jge .Lpf_exp
+    cmpq $0, %r9
+    jl .Lpf_nege
+    movq $5, %r10
+.Lpf_a1:
+    cmpq %r9, %r10
+    jle .Lpf_a2
+    cmpb $48, (%r12,%r10)
+    jne .Lpf_a2
+    decq %r10
+    jmp .Lpf_a1
+.Lpf_a2:
+    cmpq %r9, %r10
+    jle .Lpf_a3
+    movq %r10, %rcx
+.Lpf_a4:
+    movb (%r12,%rcx), %al
+    decq %rbx
+    movb %al, (%rbx)
+    decq %rcx
+    cmpq %r9, %rcx
+    jg .Lpf_a4
+    movb $46, %al
+    decq %rbx
+    movb %al, (%rbx)
+.Lpf_a3:
+    movq %r9, %rcx
+.Lpf_a5:
+    movb (%r12,%rcx), %al
+    decq %rbx
+    movb %al, (%rbx)
+    decq %rcx
+    jns .Lpf_a5
+    jmp .Lpf_emit
+.Lpf_nege:
+    movq $5, %r10
+.Lpf_b1:
+    cmpb $48, (%r12,%r10)
+    jne .Lpf_b2
+    decq %r10
+    jns .Lpf_b1
+.Lpf_b2:
+    movq %r10, %rcx
+.Lpf_b3:
+    movb (%r12,%rcx), %al
+    decq %rbx
+    movb %al, (%rbx)
+    decq %rcx
+    jns .Lpf_b3
+    movq %r9, %rcx
+    negq %rcx
+    decq %rcx
+.Lpf_b4:
+    testq %rcx, %rcx
+    jle .Lpf_b5
+    movb $48, %al
+    decq %rbx
+    movb %al, (%rbx)
+    decq %rcx
+    jmp .Lpf_b4
+.Lpf_b5:
+    movb $46, %al
+    decq %rbx
+    movb %al, (%rbx)
+    movb $48, %al
+    decq %rbx
+    movb %al, (%rbx)
+    jmp .Lpf_emit
+.Lpf_exp:
+    movq $5, %r10
+.Lpf_c1:
+    cmpb $48, (%r12,%r10)
+    jne .Lpf_c2
+    decq %r10
+    jns .Lpf_c1
+.Lpf_c2:
+    movq %r9, %r11
+    testq %r11, %r11
+    jns .Lpf_c6
+    negq %r11
+.Lpf_c6:
+    movq %r11, %rax
+    movq $10, %r8
+    xorq %rdx, %rdx
+    divq %r8
+    addb $48, %dl
+    decq %rbx
+    movb %dl, (%rbx)
+    movq %rax, %rcx
+    testq %rcx, %rcx
+    jnz .Lpf_c7
+    movb $48, %al
+    decq %rbx
+    movb %al, (%rbx)
+    jmp .Lpf_c8
+.Lpf_c7:
+    xorq %rdx, %rdx
+    movq %rcx, %rax
+    divq %r8
+    addb $48, %dl
+    decq %rbx
+    movb %dl, (%rbx)
+    movq %rax, %rcx
+    testq %rcx, %rcx
+    jnz .Lpf_c7
+.Lpf_c8:
+    testq %r9, %r9
+    jns .Lpf_c9
+    movb $45, %al
+    jmp .Lpf_c10
+.Lpf_c9:
+    movb $43, %al
+.Lpf_c10:
+    decq %rbx
+    movb %al, (%rbx)
+    movb $101, %al
+    decq %rbx
+    movb %al, (%rbx)
+    cmpq $0, %r10
+    jle .Lpf_c13
+    movq %r10, %rcx
+.Lpf_c12:
+    movb (%r12,%rcx), %al
+    decq %rbx
+    movb %al, (%rbx)
+    decq %rcx
+    cmpq $0, %rcx
+    jg .Lpf_c12
+    movb $46, %al
+    decq %rbx
+    movb %al, (%rbx)
+.Lpf_c13:
+    movb (%r12), %al
+    decq %rbx
+    movb %al, (%rbx)
+    jmp .Lpf_emit
+.Lpf_emit:
+    testq %r13, %r13
+    jz .Lpf_go
+    movb $45, %al
+    decq %rbx
+    movb %al, (%rbx)
+.Lpf_go:
+    movq %rbx, %rdi
+    leaq -33(%rbp), %rsi
+    subq %rbx, %rsi
+    call 简_写
+    addq $128, %rsp
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %rbx
+    leave
+    ret
+
     .section .rodata
 .Lnl: .byte 10
+    .align 8
+.LCF一: .quad 0x3ff0000000000000
+.LCF十: .quad 0x4024000000000000
+.LCF十万: .quad 0x40f86a0000000000
 
 /* 堆的两个游标。放 .bss：不占文件大小，加载时是 0 */
     .bss

@@ -3326,7 +3326,8 @@ a.存(50)
 </table></section>
 <section id="ch15" class=""><h1>14 · 编译与性能</h1>
 <blockquote>
-<p>简言有两条后端：C 后端（IR → C → gcc）和原生后端（IR → x86-64 汇编 → as/ld）。
+<p>简言有两条后端：C 后端（IR → C → gcc）和原生后端（IR → x86-64 汇编 → 自己的汇编器 → ELF）。
+原生后端连 <code>as</code> 和 <code>ld</code> 都不用，最后一步是自己写的。
 两条路的产物都是机器码，输出逐字节一致。这一章讲怎么用、差在哪、为什么快。</p>
 </blockquote>
 <h2>14.1 示例程序</h2>
@@ -3373,7 +3374,8 @@ diff &lt;(/tmp/a) &lt;(/tmp/b) &amp;&amp; echo 一致
 简编译 程序.jy -o 名字           # 指定输出名
 简编译 程序.jy -c               # 只出 C 代码，打到 stdout
 简编译 程序.jy -c 程序.c         # 只出 C 代码，写文件
-简编译 程序.jy -n -o 名字        # 原生后端
+简编译 程序.jy -n -o 名字        # 原生后端（自己出 ELF）
+简编译 程序.jy -n --as           # 原生后端的老路：交给 as 和 ld（对拍用）
 简编译 程序.jy -S 程序.s         # 只出汇编
 </code></pre>
 <h2>14.3 产物对比</h2>
@@ -3395,7 +3397,7 @@ diff &lt;(/tmp/a) &lt;(/tmp/b) &amp;&amp; echo 一致
 <tr>
 <td>谁收尾</td>
 <td><code>gcc -O2</code></td>
-<td><code>as</code> + <code>ld</code></td>
+<td>自己的汇编器 + 链接器</td>
 </tr>
 <tr>
 <td>运行时</td>
@@ -3404,8 +3406,8 @@ diff &lt;(/tmp/a) &lt;(/tmp/b) &amp;&amp; echo 一致
 </tr>
 <tr>
 <td>体积</td>
-<td>16144 字节</td>
-<td><strong>9272 字节</strong></td>
+<td>16176 字节</td>
+<td><strong>4096 字节</strong></td>
 </tr>
 <tr>
 <td>动态依赖</td>
