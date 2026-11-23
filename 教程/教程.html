@@ -118,6 +118,7 @@ li { margin: 5px 0; }
   <a href="#ch16" data-id="ch16">并发</a>
   <a href="#ch17" data-id="ch17">网络</a>
   <a href="#ch18" data-id="ch18">报错速查</a>
+  <a href="#ch19" data-id="ch19">手机</a>
 </nav>
 <main>
 <section id="ch00" class="cover"><div class="tag">简言 · 教程</div><h1 class="book-title">从零开始学简言</h1><p class="book-lead">一门中文关键字的编译型语言。十六个章节，每章配一个跑得起来的例子。</p>
@@ -246,6 +247,11 @@ make                 # 编出编译器 ./简编译，约 12 秒
 <td><a href="18-报错速查.md">18 报错速查</a></td>
 <td>常见报错 → 原因 → 改法</td>
 <td>—</td>
+</tr>
+<tr>
+<td><a href="19-手机.md">19 在手机上写简言</a></td>
+<td>三条走不通的路、解释执行、112 KB 的 APK</td>
+<td><code>17-手机.jy</code></td>
 </tr>
 </tbody>
 </table>
@@ -4407,6 +4413,95 @@ sed -n '/简言函数：主/,/^}/p' /tmp/看.c
 <h2>15.9 一句话</h2>
 <p><strong>报错是编译器在替你干活。</strong> 简言的报错尽量写清"哪里错、为什么错、怎么改"，
 遇到读不懂的，那多半是编译器的问题——记下来，去 <code>规范/</code> 里补一条。</p></section>
+<section id="ch19" class=""><h1>19 · 在手机上写简言</h1>
+<p>前十八章都在电脑上跑。这一章换个地方：把简言装进安卓手机。</p>
+<h2>为什么不是"交叉编译一下"</h2>
+<p>最直接的想法是把 <code>简编译</code> 交叉编译成 arm64 的可执行文件。这个想法会在三个地方撞墙：</p>
+<table>
+<thead>
+<tr>
+<th>想法</th>
+<th>撞在哪</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>交叉编译 <code>简编译</code></td>
+<td>它最后一步是调 <code>gcc</code> 生成机器码，手机上没有 gcc</td>
+</tr>
+<tr>
+<td>用原生后端</td>
+<td>自出的 ELF 是 x86-64，改 arm64 等于重写指令选择</td>
+</tr>
+<tr>
+<td>编成 .so，运行时 exec</td>
+<td>Android 10 起禁止 exec 应用私有目录</td>
+</tr>
+</tbody>
+</table>
+<p>第三条最容易忽略：在 <code>adb shell</code> 里手动跑得好好的，装成 App 就 <code>Permission denied</code>。
+这不是权限没申请，是系统策略。</p>
+<p>所以手机上走的是<strong>解释执行</strong>：不生成机器码，按中间表示一条条算。
+它与 CPU 无关，也就与 arm64 / x86 无关。</p>
+<h2>装上去</h2>
+<pre><code class="language-bash">bash 手机/构建.sh          # 出一个 /workspace/简言.apk
+adb install -r /workspace/简言.apk
+</code></pre>
+<p>APK 112 KB：7.6 KB 的编辑器界面、3.2 KB 的 dex、209 KB 的 .so。
+里面是整个编译器前端加解释器——<strong>词法、语法、语义、IR 一条都没少</strong>，
+所以手机上看到的报错和电脑上是同一句。</p>
+<h2>能写什么</h2>
+<p>打开 App，界面上是一个编辑框、一个运行按钮、一块输出。</p>
+<pre><code class="language-简言">模块 教程.统计
+
+函数 主() -&gt; 整数 {
+    私有 整数 组 分 = {88, 92, 79, 95, 61}
+    私有 整数 和 = 0
+    对 x 在 分 {
+        和 = 和 + x
+    }
+    打印行(&quot;总分 &quot; .. 字符串(和))
+    打印行(&quot;平均 &quot; .. 字符串(浮点(和) / 浮点(#分)))
+    返回 0
+}
+</code></pre>
+<p>手机上支持的东西：</p>
+<ul>
+<li>整数（含 <code>整数8/16/32</code> 的位宽截断）、浮点、布尔、字符串</li>
+<li>组、映射、结构、枚举</li>
+<li>函数、递归、函数值</li>
+<li>字符串方法、数学函数、结果类型</li>
+<li><code>引入</code>（同目录的相对路径）</li>
+</ul>
+<p>不接的，遇到会明确告诉你：图片、声音、大数、线程、通道、网络。</p>
+<h2>三个看不见的坑</h2>
+<p><strong>一、字符串常量的引号。</strong> 中间表示里存的常量是<strong>源码原文</strong>，带引号。
+C 后端有个 <code>写字面量</code> 做反转义，解释器一开始没做，于是 <code>打印行("你好")</code>
+输出 <code>"你好"</code>。两处必须逐字一致，否则同一个字符串在两边长度都不一样。</p>
+<p><strong>二、零值结构没有字段表。</strong> <code>私有 矩形 r</code> 不写初值时，IR 给一条"常量 零值"。
+解释器只把数值置零、没建字段表，后面 <code>r.左下 = ...</code> 就找不到落点。</p>
+<p><strong>三、APK 里没有 classes.dex。</strong> <code>d8</code> 把 dex 写在 <code>dex/</code> 子目录，构建脚本
+<code>cd</code> 到工作目录后 <code>zip classes.dex</code> ——目录里没有这个文件。<code>zip</code> 只警告一声，
+APK 照样签了出来。<strong>能装，点了就闪退</strong>，构建阶段完全看不出来。</p>
+<p>第三个的修法不是"小心一点"，是在签名前把内容念一遍：</p>
+<pre><code class="language-bash">unzip -l &quot;$APK&quot; classes.dex | grep -q classes.dex || exit 1
+</code></pre>
+<h2>为什么值得有一个解释器</h2>
+<p>它不只是"手机上的玩具"。同一个程序，现在有三条执行路径：</p>
+<pre><code>C 后端（gcc -O2）  ==  原生后端（自出 ELF）  ==  解释器
+</code></pre>
+<p>三方输出逐字相同，才算这个程序"语义清楚"。任何一条路径算得不一样，
+就说明某处有个没人写进规范的隐含假设。</p>
+<p><code>手机/测试.sh</code> 就是这么用的：22 个用例对拍，6 个"明确不支持"的边界检查，
+再加一层执行链路自测（写文件 → fork → 读管道 → 崩溃隔离）。</p>
+<h2>下一步</h2>
+<p>手机版还是个"跑一下"的工具，不是完整 IDE。明显的缺口：</p>
+<ul>
+<li>多文件编辑（现在只有 <code>main.jy</code>）</li>
+<li>组和映射在原生后端仍然缺失</li>
+<li>解释器没有做任何优化，递归斐波那契 30 会跑很久</li>
+</ul>
+<p>最后一条不是缺陷，是取舍：<strong>先把语义跑对，性能是下一步的事</strong>。</p></section>
 </main>
 </div>
 <script>

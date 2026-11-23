@@ -1189,5 +1189,127 @@ HTTP取(url)             → 字符串（只支持 http://，不跟重定向、�
   还没做的：组和映射还是 C 后端专属，原生后端见到它们仍然明确拒绝。
 </p>
 
+<h2>它现在装得进手机了 <small>v0.17：IR 解释器与 112 KB 的 APK</small></h2>
+<p>
+  目标很朴素：在安卓上写一段简言，点一下，看见结果。
+  三条直路全堵着——手机上没 gcc、没 as/ld；原生后端自出的是 x86-64；
+  Android 10 起禁止 <code>exec</code> 应用私有目录。
+  只剩解释执行。
+</p>
+
+<div class="card" style="margin-top:18px">
+  <h3>三条走不通的路 <b>最后一条最容易被忽略</b></h3>
+  <table>
+    <tr><th>想法</th><th>为什么不行</th></tr>
+    <tr><td>交叉编译 <code>简编译</code> 成 arm64</td><td>C 后端最后一步调 <code>gcc</code>，手机上没有</td></tr>
+    <tr><td>原生后端自出 arm64 ELF</td><td>自出那段只认 x86-64，改等于重写指令选择</td></tr>
+    <tr><td>编成 .so，运行时 exec</td><td>API 29 起的 W^X 限制，<code>adb shell</code> 能跑、装成 App 就 Permission denied</td></tr>
+  </table>
+  <p style="margin:12px 0 0;color:#6b7480;font-size:13px">
+    最后一条不是权限没申请，是系统策略。这一点不踩一次很难想到。
+  </p>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>解释器不重写语言 <b>第一行就 include 前端</b></h3>
+  <pre>#define 简_只要中间 1
+#include "../中间/ir.c"          ← 里面又整份 include 了 语义/语法/词法
+
+于是手机版拿到的诊断、类型检查、借用检查、常量折叠，
+与桌面是同一份代码。省掉的最大麻烦不是代码量，是「两边报错不一致」。</pre>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>值模型 <b>照抄 C 的结构体是行不通的</b></h3>
+  <pre>C 后端：每个值类型确定 → 直接用结构体，简字 16 字节、简组 32 字节
+解释器：执行前不知道槽里装什么 → 带标签的联合
+
+typedef struct {
+    int 种;
+    long long i;  double f;
+    解串 *字;  解组 *组;  解映 *映;
+    void *p;              /* 结构、变体、结果 */
+} 解值;
+
+代价是每个值 48 字节、载/存 整体拷贝；
+收益是不必复刻布局计算——不用知道元素宽度，也不用算字段偏移。</pre>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>容器 <b>故意选了慢的那一种</b></h3>
+  <table>
+    <tr><th>类型</th><th>C 后端</th><th>解释器</th><th>为什么</th></tr>
+    <tr><td>组</td><td>连续字节 + 元宽</td><td>解值 数组</td><td>元素天生异构，按字节搬要来回拷</td></tr>
+    <tr><td>映射</td><td>开放寻址哈希</td><td>线性数组</td><td>教学程序键数个位数，O(n) 够</td></tr>
+    <tr><td>结构</td><td>编译期算好偏移</td><td>名字 → 值 小表</td><td>不复刻布局，不怕字段改名</td></tr>
+  </table>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>隔离 <b>子进程 + 两亿条指令的闸</b></h3>
+  <pre>App ──fork──> 子进程（跑解释器）──pipe──> App 显示
+                    │
+                    └─ 崩了也只崩这里
+
+解释器里全是裸指针，用户代码是不可信输入。
+fork 之后段错误只死子进程，App 还能显示「程序异常终止：信号 11」。
+（bionic 的 malloc 注册了 atfork，fork 后继续 malloc 是安全的。）
+
+步数闸：每执行一条 IR 指令计一次，两亿条就停。
+手机上写 `当 真 { }` 太自然了，没这道闸 App 会变成一块砖。</pre>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>三个只在真机上才会犯的错 <b>都不报错</b></h3>
+  <pre>① 字符串常量带着引号
+   IR 里 q->文 是源码原文，带引号和 
+。C 后端有 写字面量 做反转义，
+   解释器直接把它当内容 —— 打印行("你好") 输出 "你好"。
+
+② 零值结构没有字段表
+   私有 矩形 r 不写初值时，只把 i 置零，没建字段表。
+   后面 r.左下 = ... 找不到落点，报「结构里没有字段」。
+
+③ APK 里没有 classes.dex
+   d8 把 dex 写在 dex/classes.dex，脚本 cd 到工作目录后 zip classes.dex，
+   目录里没有这个文件 —— zip 只警告一声，APK 照样签了出来。
+   能装，点了就闪退。构建阶段完全看不出来。</pre>
+  <p style="margin:12px 0 0;color:#6b7480;font-size:13px">
+    ③ 的修法不是「小心一点」，是在签名前把包内容念一遍：
+    <code>unzip -l "$APK" classes.dex | grep -q classes.dex || exit 1</code>
+  </p>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>包里的东西 <b>112 KB</b></h3>
+  <table>
+    <tr><th>内容</th><th>大小</th><th>哪来的</th></tr>
+    <tr><td><code>assets/index.html</code></td><td>7.6 KB</td><td>编辑器界面，一个文件，无外部依赖</td></tr>
+    <tr><td><code>classes.dex</code></td><td>3.2 KB</td><td>一个 Activity，把 WebView 立起来</td></tr>
+    <tr><td><code>lib/arm64-v8a/libjianyan.so</code></td><td>209 KB</td><td>整个编译器前端 + IR + 解释器 + JNI</td></tr>
+    <tr><td>签名</td><td>2 KB</td><td>自签，只用于装机测试</td></tr>
+  </table>
+  <p style="margin:12px 0 0;color:#6b7480;font-size:13px">
+    不用 gradle：那会拉几百兆依赖，而这里只有两个源文件和一个 .so。
+  </p>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>对拍 <b>22 个用例逐字一致</b></h3>
+  <pre>C 后端输出  ==  原生后端输出  ==  解释器输出
+
+28 个用例里解释器覆盖 22 个、原生后端 8 个。
+剩下 6 个（图片/声音/大数/并发/网络/链式）是明确的「暂不支持」，
+而且这个「不支持」本身也是受测行为：必须返回非零，并且说清是哪一块。
+
+手机/测试.sh 分三层：对拍、能力边界、执行链路（写文件→fork→读管道→崩溃隔离）。</pre>
+</div>
+
+<p style="margin-top:22px">
+  手机版不是完整实现，是教学用执行器：整数/浮点/字符串/组/映射/结构/枚举/函数
+  都能跑，图/声/大数/并发/网络不接。<strong>报错比算错好</strong>——
+  这条线从 v0.15 一直守到现在。
+</p>
+
 </body>
 </html>

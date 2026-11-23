@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>简言 Playground</title>
+<style>
+  :root {
+    --底: #0f1419;
+    --面: #171d25;
+    --面2: #1e2630;
+    --线: #2a3340;
+    --字: #dfe7ef;
+    --弱: #7d8b9c;
+    --主: #e0a94a;
+    --好: #7ec699;
+    --坏: #e06c75;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--底); color: var(--字);
+    font-family: -apple-system, "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+    overscroll-behavior: none;
+  }
+  body {
+    display: flex; flex-direction: column;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--面);
+    border-bottom: 1px solid var(--线);
+  }
+  header .标 { font-size: 15px; font-weight: 600; letter-spacing: .5px; }
+  header .标 b { color: var(--主); font-weight: 600; }
+  header .副 { font-size: 11px; color: var(--弱); margin-left: auto; }
+
+  按钮 {
+    border: 1px solid var(--线); background: var(--面2); color: var(--字);
+    border-radius: 8px; padding: 7px 14px; font-size: 13px;
+    font-family: inherit;
+  }
+  按钮:active { background: #26303c; }
+  .跑 {
+    background: var(--主); color: #1a1200; border-color: var(--主);
+    font-weight: 600;
+  }
+  .跑:active { background: #c99540; }
+
+  #码 {
+    flex: 1; min-height: 120px;
+    width: 100%; border: 0; outline: none; resize: none;
+    background: var(--底); color: var(--字);
+    font-family: "JetBrains Mono", "Sarasa Mono SC", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 14px; line-height: 1.75;
+    padding: 14px;
+    tab-size: 4;
+    caret-color: var(--主);
+  }
+
+  .横条 {
+    display: flex; gap: 8px; align-items: center;
+    padding: 8px 12px; background: var(--面);
+    border-top: 1px solid var(--线); border-bottom: 1px solid var(--线);
+  }
+  .横条 select {
+    flex: 1; background: var(--面2); color: var(--字);
+    border: 1px solid var(--线); border-radius: 8px;
+    padding: 6px 10px; font-size: 13px; font-family: inherit;
+  }
+
+  #出 {
+    height: 34vh; min-height: 120px;
+    overflow: auto;
+    margin: 0; padding: 12px 14px;
+    background: #0b0f14;
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--好);
+    border-top: 1px solid var(--线);
+  }
+  #出.坏 { color: var(--坏); }
+  #出 .灰 { color: var(--弱); }
+
+  .提示 {
+    position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%);
+    background: #26303c; color: var(--字);
+    padding: 8px 16px; border-radius: 20px; font-size: 13px;
+    opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .提示.显 { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="标">简言 <b>Playground</b></span>
+  <span class="副" id="版">手机版</span>
+</header>
+
+<textarea id="码" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+
+<div class="横条">
+  <select id="例">
+    <option value="0">你好，简言</option>
+    <option value="1">九九表</option>
+    <option value="2">斐波那契</option>
+    <option value="3">素数筛</option>
+    <option value="4">字符串</option>
+    <option value="5">浮点</option>
+  </select>
+  <button id="清">清空</button>
+  <button class="跑" id="跑">运行</button>
+</div>
+
+<pre id="出"><span class="灰">点「运行」看看结果。
+
+手机版跑的是 IR 解释器：整数/浮点/字符串/组/映射/结构/枚举都能跑，
+图片、声音、大数、线程、网络这几块没接，遇到会明确告诉你。</span></pre>
+
+<div class="提示" id="提"></div>
+
+<script>
+const 例 = [
+`模块 你好
+
+函数 主() -> 整数 {
+    打印行("你好，简言")
+    打印行("在手机上写的第一行代码")
+    返回 0
+}`,
+`模块 表.九九
+
+函数 主() -> 整数 {
+    对 i: 1~9 {
+        对 j: 1~9 {
+            打印(字符串(j) .. "x" .. 字符串(i) .. "=")
+            打印(字符串(i * j))
+            打印("  ")
+        }
+        打印行("")
+    }
+    返回 0
+}`,
+`模块 数.斐波那契
+
+函数 算(n: 整数) -> 整数 {
+    如果 n << 2 就 { 返回 n }
+    返回 算(n - 1) + 算(n - 2)
+}
+
+函数 主() -> 整数 {
+    对 i: 0~15 {
+        打印(字符串(i) .. " -> ")
+        打印行(字符串(算(i)))
+    }
+    返回 0
+}`,
+`模块 数.素数
+
+函数 主() -> 整数 {
+    私有 整数 个数 = 0
+    对 n: 2~200 {
+        私有 布尔值 是 = 真
+        对 d: 2~n-1 {
+            如果 n % d == 0 就 {
+                是 = 假
+                打断
+            }
+        }
+        如果 是 就 {
+            打印(字符串(n) .. " ")
+            个数 = 个数 + 1
+        }
+    }
+    打印行("")
+    打印行("共 " .. 字符串(个数) .. " 个")
+    返回 0
+}`,
+`模块 文本.演示
+
+函数 主() -> 整数 {
+    私有 字符串 名 = "  简言 Playground  "
+    私有 字符串 净 = 名.去空白()
+    打印行("原串 [" .. 名 .. "] 长度 " .. 字符串(#名))
+    打印行("去空白 [" .. 净 .. "] 长度 " .. 字符串(#净))
+    打印行("大写 " .. 净.大写())
+    打印行("包含 简言 = " .. 字符串(净.包含("简言")))
+    打印行("替换 " .. 净.替换("Playground", "手机版"))
+    返回 0
+}`,
+`模块 小数.演示
+
+函数 主() -> 整数 {
+    私有 浮点 和 = 0.0
+    对 i: 1~10 {
+        和 = 和 + 浮点(i) / 4.0
+    }
+    打印行("1/4 + 2/4 + … + 10/4 = " .. 字符串(和))
+    打印行("圆周率约 " .. 字符串(3.14159265358979))
+    返回 0
+}`
+];
+
+const 码框 = document.getElementById('码');
+const 出框 = document.getElementById('出');
+const 选例 = document.getElementById('例');
+const 提 = document.getElementById('提');
+
+function 提一下(话) {
+  提.textContent = 话;
+  提.classList.add('显');
+  setTimeout(() => 提.classList.remove('显'), 1400);
+}
+
+function 读存() {
+  const 存 = localStorage.getItem('简言.码');
+  const 序 = localStorage.getItem('简言.例');
+  if (序 !== null) 选例.value = 序;
+  码框.value = 存 !== null ? 存 : 例[Number(选例.value)];
+}
+function 写存() {
+  localStorage.setItem('简言.码', 码框.value);
+  localStorage.setItem('简言.例', 选例.value);
+}
+
+选例.onchange = () => {
+  码框.value = 例[Number(选例.value)];
+  写存();
+};
+码框.oninput = 写存;
+
+document.getElementById('清').onclick = () => {
+  码框.value = '';
+  写存();
+  出框.innerHTML = '<span class="灰">已清空。</span>';
+};
+
+document.getElementById('跑').onclick = () => {
+  const 代 = 码框.value;
+  if (!代.trim()) { 提一下('先写点代码'); return; }
+  出框.classList.remove('坏');
+  出框.innerHTML = '<span class="灰">运行中…</span>';
+  // 先让界面把「运行中」画出来，再进 native（native 是同步的）
+  setTimeout(() => {
+    let 果 = '';
+    try {
+      果 = 简言.运行(代);
+    } catch (e) {
+      果 = '调用失败：' + e;
+    }
+    if (!果 || !果.trim()) 果 = '（程序没有输出）';
+    if (/^(手机版|\[错误\]|简出)/m.test(果)) 出框.classList.add('坏');
+    出框.textContent = 果;
+  }, 40);
+};
+
+if (window.简言 && 简言.版本) {
+  document.getElementById('版').textContent = '手机版 v' + 简言.版本();
+}
+
+读存();
+</script>
+</body>
+</html>
