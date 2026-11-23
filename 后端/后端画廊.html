@@ -1189,7 +1189,7 @@ HTTP取(url)             → 字符串（只支持 http://，不跟重定向、�
   还没做的：组和映射还是 C 后端专属，原生后端见到它们仍然明确拒绝。
 </p>
 
-<h2>它现在装得进手机了 <small>v0.17：IR 解释器与 112 KB 的 APK</small></h2>
+<h2>它现在装得进手机了 <small>v0.17：IR 解释器与 212 KB 的 APK</small></h2>
 <p>
   目标很朴素：在安卓上写一段简言，点一下，看见结果。
   三条直路全堵着——手机上没 gcc、没 as/ld；原生后端自出的是 x86-64；
@@ -1281,12 +1281,12 @@ fork 之后段错误只死子进程，App 还能显示「程序异常终止：�
 </div>
 
 <div class="card" style="margin-top:18px">
-  <h3>包里的东西 <b>112 KB</b></h3>
+  <h3>包里的东西 <b>212 KB</b></h3>
   <table>
     <tr><th>内容</th><th>大小</th><th>哪来的</th></tr>
     <tr><td><code>assets/index.html</code></td><td>7.6 KB</td><td>编辑器界面，一个文件，无外部依赖</td></tr>
     <tr><td><code>classes.dex</code></td><td>3.2 KB</td><td>一个 Activity，把 WebView 立起来</td></tr>
-    <tr><td><code>lib/arm64-v8a/libjianyan.so</code></td><td>209 KB</td><td>整个编译器前端 + IR + 解释器 + JNI</td></tr>
+    <tr><td><code>lib/arm64-v8a/libjianyan.so</code></td><td>204 KB / 211 KB</td><td>整个编译器前端 + IR + 解释器 + JNI</td></tr>
     <tr><td>签名</td><td>2 KB</td><td>自签，只用于装机测试</td></tr>
   </table>
   <p style="margin:12px 0 0;color:#6b7480;font-size:13px">
